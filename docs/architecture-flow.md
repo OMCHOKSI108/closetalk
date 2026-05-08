@@ -683,6 +683,7 @@ flowchart LR
     DEREGISTER --> SVC_IN["Service Capacity -1"]
 
     NB["Note: Database layer scales independently:<br/>Neon: compute auto-pause/resume<br/>ScyllaDB: add nodes via Tablets rebalancing<br/>Valkey: cluster mode sharding"]
+```
 
 ---
 
