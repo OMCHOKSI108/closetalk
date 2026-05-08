@@ -1,0 +1,31 @@
+# ===== Dart / Flutter =====
+closetalk_app/.dart_tool/
+closetalk_app/.pub-cache/
+closetalk_app/.pub/
+closetalk_app/build/
+closetalk_app/coverage/
+closetalk_app/.flutter-plugins
+closetalk_app/.flutter-plugins-dependencies
+closetalk_app/.packages
+
+# ===== IDE / Editor =====
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+*.swo
+*~
+
+# ===== OS files =====
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ===== Environment / Secrets =====
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
