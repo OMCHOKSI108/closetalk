@@ -36,55 +36,52 @@
 | Media Sharing | ✅ | ✅ | Covered |
 | Read Receipts | ✅ | ✅ | Covered |
 | Typing Indicators | ✅ | ✅ | Covered |
-| Multi-Device | ✅ (retrofitted) | ✅ (native) | ⚠️ Needs detail |
-| Stories / Status | ✅ | ✅ | ❌ Missing |
-| Broadcast Lists | ✅ | ✅ | ❌ Missing |
-| Channels | ✅ | ✅ | ❌ Missing |
-| Disappearing Messages | ✅ (limited) | ✅ (flexible) | ⚠️ Mentioned in security only |
-| Message Search | ✅ | ✅ | ❌ Missing detail |
-| Message Edit/Delete | ✅ | ✅ | Covered |
-| Message Reactions | ✅ | ✅ | Covered |
-| In-Chat Polls | ❌ | ✅ | ❌ Missing |
-| Stickers / GIFs | ✅ | ✅ | ❌ Missing |
-| Message Translation | ❌ | ✅ | ❌ Missing |
-| AI Assistant | ❌ | ✅ | Covered |
-| AI Moderation | ❌ | ✅ | Covered |
-| Admin Dashboard | ❌ | ✅ | ❌ Missing |
-| Webhooks / API | ❌ | ✅ | ❌ Missing |
-| Feature Flags | ❌ | ✅ | ❌ Missing |
-| Account Recovery | ❌ (weak) | ✅ | ❌ Missing |
-| Privacy Controls | ✅ | ✅ | ❌ Missing detail |
-| Contact Discovery | ✅ (uploads raw) | ✅ (hash-based) | ❌ Missing |
-| Scheduled Messages | ❌ | ✅ | ❌ Missing |
+| Multi-Device | ✅ (retrofitted) | ✅ (native) | ✅ Covered |
+| Stories / Status | ✅ | ✅ | ✅ Covered |
+| Broadcast Lists | ✅ | ✅ | ✅ Covered |
+| Channels | ✅ | ✅ | ✅ Covered |
+| Disappearing Messages | ✅ (limited) | ✅ (flexible) | ✅ Covered |
+| Message Search | ✅ | ✅ | ✅ Covered |
+| Message Edit/Delete | ✅ | ✅ | ✅ Covered |
+| Message Reactions | ✅ | ✅ | ✅ Covered |
+| In-Chat Polls | ❌ | ✅ | ✅ Covered |
+| Stickers / GIFs | ✅ | ✅ | ✅ Covered |
+| Message Translation | ❌ | ✅ | ✅ Covered |
+| AI Assistant | ❌ | ✅ | ✅ Covered |
+| AI Moderation | ❌ | ✅ | ✅ Covered |
+| Admin Dashboard | ❌ | ✅ | ✅ Covered |
+| Webhooks / API | ❌ | ✅ | ✅ Covered |
+| Feature Flags | ❌ | ✅ | ✅ Covered |
+| Account Recovery | ❌ (weak) | ✅ | ✅ Covered |
+| Privacy Controls | ✅ | ✅ | ✅ Covered |
+| Contact Discovery | ✅ (uploads raw) | ✅ (hash-based) | ✅ Covered |
+| Scheduled Messages | ❌ | ✅ | ✅ Covered |
 | Cross-platform | iOS/Android/Web | iOS/Android/Web/Desktop | Covered |
 
-## Critical Gaps in Current Docs
+> ✅ All gaps documented. This section kept for historical reference.
 
-### 🚨 Must Add (blocks launch)
-
-1. **Multi-Device Sync Protocol** — How messages sync across phone + tablet + desktop. Key distribution for E2EE. History sync when linking new device. Device revocation.
-2. **Offline Message Queue** — What happens when user is offline for days. Backlog delivery with smart catch-up. Push notification backoff.
-3. **Media Pipeline** — Image/video thumbnail generation. Format transcoding. Virus scanning. Presigned URL upload flow. CDN cache invalidation.
-4. **Contact Discovery** — Privacy-preserving hash-based contact matching. No raw phone numbers on server.
-5. **Account Recovery** — 10 one-time recovery codes. Email recovery. Trusted device verification.
-6. **Privacy Controls** — Last-seen (nobody/everyone/contacts). Profile photo visibility. Read receipts on/off per-chat. Group add permissions. Block list with sync across devices.
-7. **Full-Text Search** — Elasticsearch service for cross-chat search. Indexing pipeline. Filters (date, sender, chat).
-8. **Message Retention** — Per-chat auto-delete (off/30d/90d/1yr). Legal hold for compliance. GDPR auto-purge.
-9. **Admin Dashboard** — User management. Moderation queue. Analytics. System health.
-10. **Feature Flags** — Gradual rollout. Kill switches. A/B testing.
-11. **Graceful Degradation** — Circuit breakers between services. Fallback when AI is down. Read-only mode when DB is degraded.
-
-### 📱 Should Add (user expectation)
-
-12. **Stories/Status** — 24h ephemeral photo/video/text. Privacy controls (contacts/close-friends/public).
-13. **Broadcast Lists / Channels** — One-to-many messaging. Subscribe/unsubscribe. Channel admin tools.
-14. **In-Chat Polls** — Create poll with options. Vote. See live results. Group decision making.
-15. **Stickers & GIFs** — Sticker packs. GIF search (Tenor/Giphy API). Custom sticker upload.
-16. **Inline Translation** — Tap message → translate via Bedrock AI. Language auto-detection.
-17. **Scheduled Messages** — Write now, send later. Timezone-aware delivery.
-18. **Message Bookmarks** — Bookmark important messages. Cross-device bookmark sync.
-19. **Product Analytics** — DAU/MAU tracking. Retention cohorts. Message volume. Feature adoption.
-20. **i18n/Localization** — Multi-language app UI. RTL support for Arabic/Hebrew.
-21. **Webhook API** — Event-driven webhooks for message events. Bot API for automation.
-22. **Load Testing** — k6/artillery scripts. Target throughput validation. Chaos engineering plan.
-23. **Schema Versioning** — Message format evolution. Forward-compatible serialization (Protobuf/FlatBuffers).
+| # | Gap | Status | Document |
+|---|---|---|---|
+| 1 | Multi-Device Sync Protocol | ✅ Covered | `multi-device-sync.md` |
+| 2 | Offline Message Queue | ✅ Covered | `architecture-flow.md` §18 |
+| 3 | Media Pipeline | ✅ Covered | `architecture-flow.md` §11 |
+| 4 | Contact Discovery | ✅ Covered | `architecture-flow.md` §12 |
+| 5 | Account Recovery | ✅ Covered | `architecture-flow.md` §13 |
+| 6 | Privacy Controls | ✅ Covered | `requirements.md` F2-F2.7 |
+| 7 | Full-Text Search | ✅ Covered | `architecture-flow.md` §14 |
+| 8 | Message Retention | ✅ Covered | `requirements.md` F5.7, F10.7 |
+| 9 | Admin Dashboard | ✅ Covered | `requirements.md` F13-F13.6 |
+| 10 | Feature Flags | ✅ Covered | `architecture-flow.md` §19 |
+| 11 | Graceful Degradation | ✅ Covered | `architecture-flow.md` §17 |
+| 12 | Stories/Status | ✅ Covered | `architecture-flow.md` §15 |
+| 13 | Broadcast/Channels | ✅ Covered | `architecture-flow.md` §16 |
+| 14 | In-Chat Polls | ✅ Covered | `requirements.md` F10.3 |
+| 15 | Stickers & GIFs | ✅ Covered | `requirements.md` F10.4-F10.5 |
+| 16 | Inline Translation | ✅ Covered | `requirements.md` F10.2 |
+| 17 | Scheduled Messages | ✅ Covered | `requirements.md` F10.1 |
+| 18 | Message Bookmarks | ✅ Covered | `requirements.md` F3.10 |
+| 19 | Product Analytics | ✅ Covered | `requirements.md` F13.4 |
+| 20 | i18n/Localization | ✅ Covered | `requirements.md` F15.5-F15.6 |
+| 21 | Webhook API | ✅ Covered | `requirements.md` F14-F14.3 |
+| 22 | Load Testing | ✅ Covered | `security.md`, `AGENTS.md` Prompt 19 |
+| 23 | Schema Versioning | ✅ Covered | `requirements.md` N6.7 |

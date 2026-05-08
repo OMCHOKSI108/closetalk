@@ -374,7 +374,7 @@ erDiagram
         uuid conversation_id FK
         uuid sender_id FK
         text content
-        string content_type "text | image | file | voice"
+        string content_type "text | image | video | file | voice"
         string media_url
         string status "sent | delivered | read"
         timestamp created_at

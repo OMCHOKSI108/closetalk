@@ -1,3 +1,6 @@
+> âš ï¸ **Original PDF extract** â€” This is the source PDF content extracted for reference.
+> See the canonical version in `architecture.md` for the authoritative system design.
+
 High-Performance Engineering for
 
 Distributed Communication: A 2026
@@ -40,7 +43,7 @@ history to ScyllaDB, and volatile session data to Valkey.1
 
 Historical Architecture vs. 2026 Distributed Standards
 Component            WhatsApp Classic Model     Closetalk 2026
-                     (2009­2014)                Distributed Model
+                     (2009ï¿½2014)                Distributed Model
 
 Operating System     FreeBSD (YAWS / Ejabberd)  Linux-based Containers
                                                 (AWS Fargate) 2
@@ -140,7 +143,7 @@ A standout feature of Neon in 2026 is its "Copy-on-Write" branching capability, 
 the near-instant creation of database branches.7 For the Closetalk development team, this
 means each feature branch or pull request can have its own isolated production-data clone
 without copying the actual data or incurring significant costs.7 Furthermore, Neon's resume
-time of 300­500 milliseconds from a cold start is an order of magnitude faster than AWS
+time of 300ï¿½500 milliseconds from a cold start is an order of magnitude faster than AWS
 Aurora Serverless v2, making it the "cheapest to start" option for a chat application that may
 have periods of low activity during the MVP phase.6
 
@@ -153,7 +156,7 @@ shard-per-core architecture that extracts maximum performance from modern multi-
 hardware.5
 
 For Closetalk, ScyllaDB offers three primary advantages over DynamoDB. First, its p99 latency is
-consistently in the 5­10 ms range, compared to DynamoDB's typical 100 ms in high-load
+consistently in the 5ï¿½10 ms range, compared to DynamoDB's typical 100 ms in high-load
 scenarios.5 Second, ScyllaDB provides far better handling of "hot partitions"--a common
 occurrence in large group chats where a single partition key (the chat ID) receives a
 disproportionate amount of traffic.5 Unlike DynamoDB, which imposes hard limits on partition
@@ -164,7 +167,7 @@ need for external caching layers like DAX, reducing architectural complexity and
 Performance and Cost Efficiency: ScyllaDB vs. DynamoDB (2026)
 
 Metric       DynamoDB       ScyllaDB Cloud  Savings /
-             (Provisioned)  5­10 ms 5       Improvement
+             (Provisioned)  5ï¿½10 ms 5       Improvement
 Typical P99
 Latency      ~100 ms 5                      10x-20x Lower 5
 Write Cost Model   5x more expensive     Uniform pricing 19     Significant for chat
@@ -311,7 +314,7 @@ Global Architecture Performance (2026)
 
 Network Path         Average Global Latency  Reliability Mechanism
 
-Public Internet      150­300 ms 35           Unpredictable
+Public Internet      150ï¿½300 ms 35           Unpredictable
 AWS Global Backbone  < 50 ms 35              (Congestion-prone) 34
 
                                              Congestion-free / Managed
@@ -367,7 +370,7 @@ Messaging Decision Matrix (2026)
 Service              Best Use Case               2026 Pricing
                                                  Consideration
 
-SQS (Standard/FIFO)  Asynchronous job buffering  $0.40­$0.50 per million
+SQS (Standard/FIFO)  Asynchronous job buffering  $0.40ï¿½$0.50 per million
                                                  requests 39
                      39
 
@@ -428,7 +431,7 @@ transitioning to provisioned capacity as traffic becomes predictable. The "Effic
 for Closetalk is built on the AWS Free Tier, but it is architected to avoid the "scaling cliff" where
 costs spike uncontrollably as users grow.
 
-MVP Stage (0­1,000 DAU, Free Tier Optimized)
+MVP Stage (0ï¿½1,000 DAU, Free Tier Optimized)
 
 Service  Configuration  Monthly Cost (Est.)
 Compute
@@ -446,7 +449,7 @@ NoSQL          data) 21
 
 Messaging      SQS FIFO (1M requests) 39    $0
 
-Total                                       ~$5.00­10.00
+Total                                       ~$5.00ï¿½10.00
 
 At the MVP stage, the costs are essentially near-zero, limited only by minimal data storage fees
 and serverless "pay-as-you-go" triggers. The use of Neon and Valkey Serverless ensures that if
@@ -547,7 +550,7 @@ Works cited
     on May 8, 2026,
     https://techbytes.app/posts/webtransport-vs-websockets-low-latency-streamin
     g-2026/
-13.WebSockets, WebTransport, and Beyond ­ Post 5/5 | CoddyKit Blog, accessed on
+13.WebSockets, WebTransport, and Beyond ï¿½ Post 5/5 | CoddyKit Blog, accessed on
     May 8, 2026, https://www.coddykit.com/pages/blog-detail?id=512516
 14.10 Best Managed Postgres Providers Compared (2026) - Dreamlit AI, accessed
     on May 8, 2026, https://dreamlit.ai/blog/top-10-managed-postgres-providers
