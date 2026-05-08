@@ -4,16 +4,27 @@
 
 CloseTalk is a real-time chat application that connects people through instant messaging, group conversations, voice/video calls, and AI-powered features. Built with Flutter for cross-platform reach and a cloud-native backend for scale.
 
+CloseTalk fixes every major problem WhatsApp users have faced — TCP head-of-line blocking, phone-dependent multi-device, raw contact upload to servers, media quality loss, manual spam reporting, and hard-to-scale architecture.
+
 ## Features
 
 - **Instant Messaging** — Send text, images, voice notes, and files with real-time delivery and read receipts
 - **Group Chats** — Create groups up to 1,000 members with admin controls, @mentions, and pinned messages
-- **Voice & Video Calls** — One-to-one and group calls powered by WebRTC
+- **Voice & Video Calls** — One-to-one and group calls with AI noise suppression
+- **Native Multi-Device** — Phone NOT required as relay. Each device connects independently with its own WebTransport session
 - **AI Assistant** — Context-aware chat assistant with persistent memory for summaries, suggestions, and answers
 - **Content Moderation** — Real-time AI-powered filtering for hate speech, PII, and harassment using Bedrock Guardrails
-- **Typing Indicators & Presence** — Live typing status and online presence via WebTransport datagrams
+- **Stories / Status** — 24h ephemeral photo, video, and text posts with privacy controls
+- **Broadcast & Channels** — One-to-many messaging with subscribe/unsubscribe
+- **In-Chat Polls** — Create, vote, and see live results
+- **Inline Translation** — Tap any message to translate via AI
+- **Full-Text Search** — Search across all chats with filters (date, sender, chat)
+- **Typing Indicators & Presence** — Live typing status and online presence via WebTransport datagrams (QUIC, <20ms)
+- **Message Retention** — Per-chat auto-delete: off / 30d / 90d / 1yr
+- **Disappearing Messages** — 5s / 30s / 5m / 1h / 24h per chat
+- **Block List & Privacy Controls** — Granular last-seen, profile photo, read receipts, and group add permissions
+- **End-to-End Encryption** — Optional Signal Protocol with per-device key pairs
 - **Cross-Platform** — Android, iOS, Web, Windows, macOS, and Linux from a single Flutter codebase
-- **End-to-End Encryption** — Optional Signal Protocol encryption for private conversations
 
 ## Tech Stack
 
@@ -96,11 +107,14 @@ closetalk/
 | Document | Description |
 |---|---|
 | Architecture | docs/architecture.md |
-| Architecture Diagrams | docs/architecture-flow.md |
-| Security & Compliance | docs/security.md |
-| Requirements | docs/requirements.md |
-| Project Planning | docs/planning.md |
-| Product Vision | docs/product-vision.md |
+| Architecture Diagrams (Mermaid) | docs/architecture-flow.md |
+| Security, Compliance & Maintenance | docs/security.md |
+| Requirements (Functional + Non-Functional) | docs/requirements.md |
+| Project Planning Checklist | docs/planning.md |
+| Product Vision & UX | docs/product-vision.md |
+| Multi-Device Sync Protocol | docs/multi-device-sync.md |
+| WhatsApp Gap Analysis & Fixes | docs/whatsapp-gap-analysis.md |
+| Full Architectural Standard (PDF extract) | docs/closetalk-architecture.md |
 
 ## Cost Overview
 

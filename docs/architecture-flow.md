@@ -683,3 +683,399 @@ flowchart LR
     DEREGISTER --> SVC_IN["Service Capacity -1"]
 
     NB["Note: Database layer scales independently:<br/>Neon: compute auto-pause/resume<br/>ScyllaDB: add nodes via Tablets rebalancing<br/>Valkey: cluster mode sharding"]
+
+---
+
+## 11. Media Upload & Processing Pipeline
+
+```mermaid
+sequenceDiagram
+    participant Client as Flutter Client
+    participant MS as Media Service
+    participant S3 as S3 Bucket
+    participant Lambda as Async Lambda
+    participant CF as CloudFront CDN
+    participant VL as Valkey (Thumbnail Cache)
+    participant CV as ClamAV (Virus Scan)
+
+    Client->>MS: POST /media/upload-url { file_type, file_size, chat_id }
+    MS->>MS: Validate file size & type
+    MS->>S3: Generate presigned PUT URL (expires in 5 min)
+    MS->>Client: 200 { upload_url, media_id, cdn_url }
+
+    Client->>S3: PUT directly to S3 (raw file, original quality)
+    S3->>Client: 201 ETag
+    Client->>MS: POST /media/confirm { media_id, etag }
+
+    Note over S3,CV: Server never touches raw bytes (no quality loss)
+
+    S3->>Lambda: Trigger on s3:ObjectCreated
+
+    par Virus Scan
+        Lambda->>S3: Read file bytes
+        Lambda->>CV: Scan for malware
+        alt Malware Detected
+            Lambda->>S3: Move file to quarantine/
+            Lambda->>MS: Update status: "quarantined"
+            MS->>Client: Alert "File flagged for review"
+        end
+    and Thumbnail Generation (images)
+        Lambda->>Lambda: Generate thumbnails (100x100, 400x400, 1200x1200)
+        Lambda->>S3: Store thumbnails
+    and Video Transcoding (if video)
+        Lambda->>Lambda: Transcode to HLS (1080p, 720p, 480p)
+        Lambda->>S3: Store HLS segments + playlist
+    and Image Optimization
+        Lambda->>Lambda: Convert to WebP/AVIF
+        Lambda->>S3: Store optimized versions
+    end
+
+    Lambda->>VL: Cache thumbnail URLs (TTL: 1hr)
+    Lambda->>MS: Update status: "ready"
+    MS->>Client: Push notification: media ready
+
+    Client->>CF: GET /media/{media_id}/thumbnail.jpg
+    CF->>S3: Fetch from origin (if not cached)
+    CF->>Client: Deliver thumbnail (cached at edge)
+```
+
+## 12. Privacy-Preserving Contact Discovery Flow
+
+```mermaid
+sequenceDiagram
+    participant Client as Flutter Client
+    participant US as User Service
+    participant PG as PostgreSQL
+    participant VL as Valkey (Cache)
+
+    Note over Client: User grants contact permission
+    Client->>Client: Read phone contacts (local only)
+    Client->>Client: SHA-256 hash each phone number
+
+    Client->>US: POST /contacts/discover { hashes: [hash1, hash2, ...] }
+
+    Note over US: Server NEVER sees raw phone numbers
+
+    US->>VL: Check cache for known hashes
+    alt Cache miss
+        US->>PG: SELECT user_id, display_name, avatar_url WHERE phone_hash IN (...)
+        PG->>US: Return matched users
+        US->>VL: Cache results (TTL: 24hr)
+    end
+
+    US->>Client: 200 { contacts: [{ user_id, display_name, avatar_url, is_registered: true }] }
+
+    Client->>Client: Show "X contacts on CloseTalk"
+    Client->>Client: Mark registered contacts with app icon
+
+    Note over Client,US: No raw contacts stored on server — ever
+```
+
+## 13. Account Recovery Flow
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant Client as Flutter App
+    participant AS as Auth Service
+    participant PG as PostgreSQL
+    participant SM as SES (Email)
+
+    Note over U: User lost phone / can't log in
+
+    U->>Client: Tap "Forgot / Lost access?"
+
+    alt Have Recovery Codes
+        Client->>U: Enter one of 10 recovery codes
+        U->>Client: Enter code XXXXX-XXXXX
+        Client->>AS: POST /auth/recover { code }
+        AS->>PG: Verify recovery code hash
+        alt Valid
+            AS->>PG: Invalidate used code, generate new session
+            AS->>Client: 200 { session_token, prompt: "Link new device?" }
+        else Invalid
+            AS->>Client: 401 { attempts_remaining: N }
+        end
+
+    else Email Recovery
+        Client->>AS: POST /auth/recover/email { email }
+        AS->>SM: Send recovery link to registered email
+        SM->>U: Click link (expires in 15 min)
+        U->>Client: Open link → verify identity
+        Client->>AS: POST /auth/recover/verify { token }
+        AS->>Client: 200 { session_token }
+
+    else Trusted Device
+        Client->>AS: POST /auth/recover/trusted { device_id }
+        AS->>Client: Show list of trusted devices
+        U->>Client: Select trusted device
+        Client->>AS: POST /auth/recover/approve { device_id }
+        Note over AS,Client: Push notification to trusted device
+        AS->>Client: 200 { session_token } (after approval)
+
+    end
+
+    Note over U: Recovery codes are displayed ONCE at signup
+    Note over U: User must save them (screenshot / print / password manager)
+```
+
+## 14. Full-Text Search Flow
+
+```mermaid
+sequenceDiagram
+    participant Client as Flutter Client
+    participant SS as Search Service
+    participant ES as Elasticsearch
+    participant VL as Valkey (Cache)
+    participant MS as Message Service
+
+    Note over Client: User types in search bar
+    Client->>Client: Debounce input (300ms)
+
+    Client->>SS: GET /search?q=meeting+tomorrow&chat_id=optional&from=date&to=date&sender=user_id&page=1
+
+    SS->>VL: Check cache for identical query
+    alt Cache hit
+        VL->>SS: Return cached results
+    else Cache miss
+        SS->>ES: Search index with filters + relevance scoring
+        ES->>SS: Return hits with scores, highlights, pagination
+        SS->>VL: Cache results (TTL: 5 min)
+    end
+
+    SS->>Client: 200 { results: [{ message_id, chat_id, snippet, sender, date, score }], total, page }
+
+    Client->>Client: Display results grouped by chat, sorted by relevance
+
+    Note over Client: Tap result → navigate to exact message in chat
+
+    SS->>MS: Log search query (anonymized, for analytics)
+```
+
+## 15. Stories / Status Flow
+
+```mermaid
+sequenceDiagram
+    actor Alice as Alice (Poster)
+    actor Bob as Bob (Viewer)
+    participant Client_A as Flutter (Alice)
+    participant SS as Status Service
+    participant S3 as S3
+    participant SDB as ScyllaDB
+    participant Client_B as Flutter (Bob)
+
+    Note over Alice,Bob: POSTING A STATUS
+
+    Alice->>Client_A: Take photo / record video / type text
+    Client_A->>SS: POST /status { type: "image"|"video"|"text", content, privacy: "contacts"|"close_friends"|"public" }
+    SS->>S3: Store media (presigned URL)
+    SS->>SDB: INSERT status { user_id, media_url, type, privacy, created_at, expires_at: now+24h }
+    SS->>Client_A: 200 { status_id }
+
+    Note over Alice,Bob: VIEWING STATUSES
+
+    Bob->>Client_B: Open status tab
+    Client_B->>SS: GET /status/updates
+    SS->>SDB: SELECT statuses WHERE (privacy = "public" OR viewer in allowed_list) AND expires_at > now
+    SS->>Client_B: 200 { updates: [{ user, statuses: [...] }] }
+
+    Bob->>Client_B: Tap to view Alice's status
+    Client_B->>SS: POST /status/{id}/view { viewer_id: bob }
+    SS->>SDB: INSERT status_view { status_id, viewer_id, viewed_at }
+    SS->>Client_B: 200 OK
+
+    Note over Alice: Later...
+    Alice->>Client_A: Open "Who viewed my status"
+    Client_A->>SS: GET /status/{id}/views
+    SS->>SDB: SELECT viewers WHERE status_id = ?
+    SS->>Client_A: 200 { viewers: [{ user_id, display_name, viewed_at }] }
+
+    Note over SS,SDB: Auto-cleanup: Lambda runs every hour, deletes expired statuses (>24h)
+```
+
+## 16. Broadcast & Channels Flow
+
+```mermaid
+sequenceDiagram
+    actor Admin as Channel Admin
+    actor Sub as Subscriber
+    participant Client_A as Flutter (Admin)
+    participant CS as Channel Service
+    participant SDB as ScyllaDB
+    participant SNS as SNS Push
+    participant Client_B as Flutter (Subscriber)
+
+    Note over Admin,Sub: CREATING A CHANNEL
+
+    Admin->>Client_A: Create channel { name, description, avatar }
+    Client_A->>CS: POST /channels { name, description, is_public: true }
+    CS->>SDB: INSERT channel
+    CS->>Client_A: 200 { channel_id, invite_link }
+
+    Admin->>Client_A: Share invite link with subscribers
+
+    Sub->>Client_B: Tap invite link
+    Client_B->>CS: POST /channels/{id}/subscribe
+    CS->>SDB: INSERT channel_subscriber { channel_id, user_id, subscribed_at }
+    CS->>Client_B: 200 { channel_name, message_count }
+
+    Note over Admin,Sub: SENDING A BROADCAST
+
+    Admin->>Client_A: Send message to channel
+    Client_A->>CS: POST /channels/{id}/messages { content }
+    CS->>SDB: INSERT channel_message
+    CS->>SDB: SELECT subscribers WHERE channel_id = ?
+    CS->>SNS: Fan-out push notification to all subscribers
+    SNS-->>Client_B: Push notification
+    Client_B->>CS: GET /channels/{id}/messages?since=last_id
+    CS->>Client_B: 200 { messages: [...] }
+```
+
+## 17. Graceful Degradation & Circuit Breakers
+
+```mermaid
+flowchart TB
+    subgraph Normal["Normal Operation"]
+        REQ["Request Incoming"]
+        CB_OK["Circuit Breaker: CLOSED"]
+        PROXY["Proxy to Service"]
+        RESP["Return Response"]
+    end
+
+    subgraph Degraded["Service Failure"]
+        REQ_FAIL["Request Incoming"]
+        CB_OPEN["Circuit Breaker: OPEN<br/>(Fail Fast)"]
+        FALLBACK["Fallback Handler"]
+    end
+
+    subgraph Recovery["Recovery"]
+        CB_HALF["Circuit Breaker: HALF-OPEN<br/>(Test Request)"]
+        TEST_OK["Test Succeeds"]
+        TEST_FAIL["Test Fails"]
+    end
+
+    REQ --> CB_OK
+    CB_OK --> PROXY
+    PROXY -->|Error Threshold Exceeded| CB_OPEN
+    PROXY --> RESP
+
+    REQ_FAIL --> CB_OPEN
+    CB_OPEN --> FALLBACK
+
+    FALLBACK -->|Timeout elapsed| CB_HALF
+    CB_HALF --> TEST_OK
+    CB_HALF --> TEST_FAIL
+    TEST_OK --> CB_OK
+    TEST_FAIL --> CB_OPEN
+
+    subgraph Fallbacks["Per-Service Fallbacks"]
+        AI["AI Moderation Down"] --> AI_FB["Pass-through + Deferred Scan"]
+        DB["Database Degraded"] --> DB_FB["Read-Only Mode + Queue Writes"]
+        SEARCH["Search Down"] --> SRCH_FB["Basic SQL LIKE + No Relevance"]
+        WT["WebTransport Down"] --> WT_FB["SSE → WebSocket Fallback"]
+        PUSH["Push Service Down"] --> PUSH_FB["Poll on Reconnect"]
+    end
+
+    FALLBACK --> Fallbacks
+
+    style Normal fill:#4CAF50,color:#fff
+    style Degraded fill:#FF9800,color:#fff
+    style Recovery fill:#2196F3,color:#fff
+    style CB_OK fill:#4CAF50,color:#fff
+    style CB_OPEN fill:#f44336,color:#fff
+    style CB_HALF fill:#FF9800,color:#fff
+```
+
+## 18. Offline Message Queue & Catch-Up Sync
+
+```mermaid
+sequenceDiagram
+    participant Sender as Sender Device
+    participant MS as Message Service
+    participant SDB as ScyllaDB
+    participant VL as Valkey
+    participant SNS as Push Notification
+    participant Recipient as Recipient (Reconnecting)
+
+    Note over Sender,Recipient: User goes offline
+
+    Sender->>MS: Send message
+    MS->>SDB: Persist message (status: "pending")
+
+    MS->>VL: Check recipient online status
+    alt Recipient OFFLINE
+        MS->>SNS: Push notification via APNs/FCM
+
+        Note over SNS,Recipient: Days later — recipient reconnects
+
+        Recipient->>MS: WebTransport reconnect + JWT
+        MS->>VL: Update status to online
+
+        Recipient->>MS: GET /sync/messages?after={last_known_id}
+
+        MS->>SDB: Query pending messages > last_known_id for this user
+        SDB->>MS: Return backlog
+
+        MS->>Recipient: Deliver messages (batched, ordered)
+
+        Note over Recipient: Apply exponential backoff for large backlogs:
+        Note over Recipient: < 100 msgs → deliver all immediately
+        Note over Recipient: 100-1000 msgs → deliver in 50-msg batches
+        Note over Recipient: > 1000 msgs → deliver first 500, rest on demand
+
+        Recipient->>MS: Process each batch
+        Recipient->>MS: GET /sync/messages?after={last_id}
+        MS->>Recipient: Next batch (if any)
+    end
+
+    MS->>MS: Update message status to "delivered"
+    MS->>Sender: Push delivery receipt (if sender online)
+```
+
+## 19. Feature Flag System
+
+```mermaid
+flowchart TB
+    subgraph Admin["Admin Console"]
+        FF_TOGGLE["Toggle Feature Flag"]
+        FF_CONFIG["Set Rollout %<br/>Set User Segments<br/>Set Platform Filter"]
+    end
+
+    subgraph Storage["Flag Storage"]
+        VL_FLAGS["Valkey (Hot)<br/>TTL: 5 min"]
+        PG_FLAGS["PostgreSQL (Source of Truth)"]
+    end
+
+    subgraph Client["Client Request"]
+        APP_START["App Start / Event"]
+        SDK_CHECK["Feature Flag SDK<br/>Check: isEnabled('feature_x')"]
+    end
+
+    subgraph Decision["Decision Logic"]
+        ROLLOUT["Rollout % Check<br/>user_id hash < %"]
+        SEGMENT["Segment Check<br/>region / platform / plan"]
+        KILL["Kill Switch Check<br/>globally disabled?"]
+    end
+
+    Admin -->|Write| PG_FLAGS
+    PG_FLAGS -->|Sync every 5s| VL_FLAGS
+
+    APP_START --> SDK_CHECK
+    SDK_CHECK --> VL_FLAGS
+    VL_FLAGS --> KILL
+    KILL -->|Killed| BLOCK["Feature Hidden"]
+    KILL -->|Active| ROLLOUT
+    ROLLOUT -->|In Rollout| ENABLE["Feature Enabled"]
+    ROLLOUT -->|Not in Rollout| BLOCK
+
+    SEGMENT -->|Matches| ENABLE
+    SEGMENT -->|No Match| BLOCK
+
+    subgraph UseCases["Use Cases"]
+        UC1["Gradual Rollout: 1% → 5% → 25% → 100%"]
+        UC2["Kill Switch: Disable AI Moderation instantly"]
+        UC3["Platform Filter: iOS only beta feature"]
+        UC4["Region Filter: Enable Stories in India first"]
+        UC5["A/B Test: 50% see new UI, 50% see old"]
+    end
+```
