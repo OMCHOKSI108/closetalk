@@ -33,18 +33,19 @@ User → CloudFront (HTTPS) → ALB (HTTP) → ECS Fargate (auth-service:8081 / 
 | `auth-service` | 8081 | 512 | 1024 | 1 |
 | `message-service` | 8082 | 512 | 1024 | 1 |
 
-- Platform version: 1.4.0 (Linux)
+- Platform version: LATEST
 - Network: Private subnets, no public IP
 - Auto-scaling: Manual (desired count = 1)
 - Deploy strategy: Rolling update (`aws ecs update-service`)
 
 ### ALB Routing Rules
 
-| Path Pattern | Target Group | Service |
-|---|---|---|
-| `/`, `/auth/*`, `/devices/*`, `/groups/*`, `/health` | auth-tg | auth-service:8081 |
-| `/messages/*`, `/bookmarks/*`, `/sync/*`, `/ws` | msg-tg | message-service:8082 |
-| Default (unmatched) | 404 JSON response | — |
+| Priority | Path Pattern | Target Group | Service |
+|---|---|---|---|
+| 1 | `/`, `/auth/*`, `/devices/*`, `/groups/*`, `/health` | auth-tg | auth-service:8081 |
+| 2 | `/messages/*`, `/bookmarks/*`, `/sync/*`, `/ws` | msg-tg | message-service:8082 |
+| 3 | `/messages`, `/bookmarks` | msg-tg | message-service:8082 |
+| Default | unmatched → 404 JSON | — | — |
 
 ### CloudFront
 
@@ -118,7 +119,7 @@ All tables have SSE enabled and PITR (point-in-time recovery) enabled.
 
 Workflow: `.github/workflows/deploy.yml`
 
-Triggers: Push to `main` (closetalk_backend/**), or manual dispatch
+Triggers: Push to `master` (closetalk_backend/**), or manual dispatch
 
 Steps:
 1. Checkout code
@@ -138,8 +139,6 @@ Steps:
 | `ECR_AUTH_REPO` | `closetalk/auth-service` |
 | `ECR_MESSAGE_REPO` | `closetalk/message-service` |
 | `ECS_CLUSTER` | `closetalk-production` |
-| `ECS_AUTH_TASK_DEF` | `closetalk-auth-service` |
-| `ECS_MESSAGE_TASK_DEF` | `closetalk-message-service` |
 
 ## Cost Estimate
 
@@ -178,3 +177,6 @@ aws ecs update-service --cluster closetalk-production --service auth-service --d
 | 2026-05-09 | Dockerfile bugfix — `WORKDIR` / `COPY` collision fixed |
 | 2026-05-09 | Added CloudFront distribution for HTTPS |
 | 2026-05-09 | ALB default action changed to 404 (was broken HTTPS redirect) |
+| 2026-05-09 | CI/CD pipeline fix — `${{ secrets.* }}` removed from matrix, secrets updated |
+| 2026-05-09 | Dockerfile fix — added `ARG PORT` in final stage for HEALTHCHECK/EXPOSE |
+| 2026-05-09 | Terraform IAM — added SES `SendEmail` permission to ECS task role |

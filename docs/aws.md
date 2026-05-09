@@ -147,7 +147,7 @@ graph TB
 - `/ecs/closetalk/message-service` — 30 day retention
 
 ### CI/CD — GitHub Actions
-- **Trigger:** Push to `main` (closetalk_backend/**) or manual dispatch
+- **Trigger:** Push to `master` (closetalk_backend/**) or manual dispatch
 - **Pipeline:** Build → Push to ECR → Register task def → Deploy ECS
 - **Credentials:** IAM user access keys (stored as GitHub secrets)
 
@@ -282,7 +282,7 @@ Register + login + send msg     | 20/s      | ~200ms      | ~500ms      | 0%
 
 ### ECS Task Role (`closetalk-ecs-task-production`)
 - DynamoDB: full CRUD on `closetalk-messages`, `closetalk-message-reactions`, `closetalk-message-reads`, `closetalk-bookmarks`
-- SES: `SendEmail`
+- SES: `SendEmail`, `SendRawEmail`
 
 ---
 

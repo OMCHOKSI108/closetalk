@@ -518,6 +518,13 @@ resource "aws_iam_role_policy" "ecs_task_dynamodb" {
         aws_dynamodb_table.reads.arn,
         aws_dynamodb_table.bookmarks.arn,
       ]
+    },{
+      Effect = "Allow"
+      Action = [
+        "ses:SendEmail",
+        "ses:SendRawEmail",
+      ]
+      Resource = "*"
     }]
   })
 }
