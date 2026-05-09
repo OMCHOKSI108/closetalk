@@ -104,7 +104,7 @@ All tables have SSE enabled and PITR (point-in-time recovery) enabled.
 ### IAM Roles
 
 - `closetalk-ecs-execution-production` — ECR pull, CloudWatch logs
-- `closetalk-ecs-task-production` — DynamoDB CRUD access for all 4 tables
+- `closetalk-ecs-task-production` — DynamoDB CRUD on all 4 tables, SES `SendEmail`
 
 ## Security Groups
 
