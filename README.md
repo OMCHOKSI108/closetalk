@@ -81,6 +81,8 @@ graph TB
     MS --> CW
 ```
 
+![AWS Infrastructure](docs/aws_infra.png)
+
 The system uses a **disaggregated architecture** — each layer scales independently. Compute is stateless (just add more Fargate tasks). Data is routed to the best engine for each job: ACID metadata to RDS PostgreSQL, high-throughput messages to DynamoDB, low-latency session state to ElastiCache Valkey.
 
 ## Backend API
