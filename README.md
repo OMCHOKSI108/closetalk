@@ -158,20 +158,22 @@ closetalk/
 └── README.md
 ```
 
+
 ## Documentation
 
-| Document | Description |
-|---|---|---|
-| Architecture | docs/architecture.md |
-| Architecture Diagrams (Mermaid) | docs/architecture-flow.md |
-| Security, Compliance & Maintenance | docs/security.md |
-| Requirements (Functional + Non-Functional) | docs/requirements.md |
-| Project Planning Checklist | docs/planning.md |
-| Product Vision & UX | docs/product-vision.md |
-| Multi-Device Sync Protocol | docs/multi-device-sync.md |
-| WhatsApp Gap Analysis & Fixes | docs/whatsapp-gap-analysis.md |
-| Full Architectural Standard (PDF extract) | docs/closetalk-architecture.md |
-| Deployment Infrastructure | docs/infrastructure.md |
+| Document                         | Description                                |
+| -------------------------------- | ------------------------------------------ |
+| `docs/architecture.md`           | Architecture                               |
+| `docs/architecture-flow.md`      | Architecture Diagrams (Mermaid)            |
+| `docs/security.md`               | Security, Compliance & Maintenance         |
+| `docs/requirements.md`           | Requirements (Functional + Non-Functional) |
+| `docs/planning.md`               | Project Planning Checklist                 |
+| `docs/product-vision.md`         | Product Vision & UX                        |
+| `docs/multi-device-sync.md`      | Multi-Device Sync Protocol                 |
+| `docs/whatsapp-gap-analysis.md`  | WhatsApp Gap Analysis & Fixes              |
+| `docs/closetalk-architecture.md` | Full Architectural Standard (PDF extract)  |
+| `docs/infrastructure.md`         | Deployment Infrastructure                  |
+
 
 ## Cost Overview
 
