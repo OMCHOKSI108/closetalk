@@ -34,12 +34,12 @@ jobs:
             dockerfile: closetalk_backend/Dockerfile
             context: closetalk_backend
             port: 8081
-            task_def: ${{ secrets.ECS_AUTH_TASK_DEF }}
+            task_def: closetalk-auth-service
           - name: message-service
             dockerfile: closetalk_backend/Dockerfile
             context: closetalk_backend
             port: 8082
-            task_def: ${{ secrets.ECS_MESSAGE_TASK_DEF }}
+            task_def: closetalk-message-service
       fail-fast: false
 
     steps:

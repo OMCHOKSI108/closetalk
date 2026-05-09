@@ -17,6 +17,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 
 FROM alpine:3.21
 
+ARG PORT=8081
+
 RUN apk add --no-cache ca-certificates tzdata
 
 RUN adduser -D -g '' closetalk
