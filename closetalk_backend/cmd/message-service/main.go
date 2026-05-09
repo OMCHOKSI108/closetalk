@@ -640,7 +640,5 @@ func handleRemoveBookmark(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleListBookmarks(w http.ResponseWriter, r *http.Request) {
-	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
-	// For in-memory store, return empty (bookmarks are per-user)
 	writeJSON(w, http.StatusOK, map[string]any{"bookmarks": []any{}})
 }

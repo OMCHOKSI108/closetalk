@@ -93,6 +93,23 @@ func main() {
 		r.Post("/devices/revoke", handleRevokeDevice)
 	})
 
+	// Group routes (JWT required)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+		r.Get("/groups", handleListGroups)
+		r.Post("/groups", handleCreateGroup)
+		r.Get("/groups/{id}", handleGetGroup)
+		r.Post("/groups/{id}/invite", handleGenerateInvite)
+		r.Post("/groups/join", handleJoinGroup)
+		r.Post("/groups/{id}/members", handleAddMembers)
+		r.Delete("/groups/{id}/members/{userId}", handleRemoveMember)
+		r.Put("/groups/{id}/members/{userId}/role", handleUpdateRole)
+		r.Post("/groups/{id}/leave", handleLeaveGroup)
+		r.Put("/groups/{id}/settings", handleUpdateGroupSettings)
+		r.Post("/groups/{id}/pin", handlePinMessage)
+		r.Delete("/groups/{id}/pin/{messageId}", handleUnpinMessage)
+	})
+
 	// Start server
 	port := os.Getenv("PORT")
 	if port == "" {

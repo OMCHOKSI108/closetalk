@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/OMCHOKSI108/closetalk/internal/model"
-	"github.com/gocql/gocql"
 	"github.com/google/uuid"
 )
 

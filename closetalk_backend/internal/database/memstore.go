@@ -16,7 +16,7 @@ type MemStore struct {
 	messages   map[uuid.UUID]*model.Message
 	reactions  map[uuid.UUID][]model.Reaction // messageID -> reactions
 	reads      map[uuid.UUID]map[string]time.Time // messageID -> userID -> read_at
-	bookmarks  map[string]map[uuid.UUID]*model.BookmarkEntry // userID -> messageID -> entry
+	bookmarks  map[string]map[uuid.UUID]*BookmarkEntry // userID -> messageID -> entry
 }
 
 type BookmarkEntry struct {
