@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -30,19 +29,7 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
-type wsClient struct {
-	conn   *websocket.Conn
-	userID string
-	chatID string
-	send   chan []byte
-}
-
-type wsHub struct {
-	mu      sync.RWMutex
-	clients map[string]map[*wsClient]bool // chatID -> clients
-}
-
-var hub = &wsHub{clients: make(map[string]map[*wsClient]bool)}
+var hub = newHub()
 
 func main() {
 	_ = godotenv.Load()
@@ -62,6 +49,13 @@ func main() {
 		log.Printf("[warn] valkey not available: %v", err)
 	} else {
 		defer database.CloseValkey()
+	}
+
+	// Connect Neon for sync queries (conversation membership)
+	if err := database.ConnectNeon(); err != nil {
+		log.Printf("[warn] neon not available, sync will be limited: %v", err)
+	} else {
+		defer database.CloseNeon()
 	}
 
 	r := chi.NewRouter()
@@ -104,6 +98,15 @@ func main() {
 		r.Get("/bookmarks", handleListBookmarks)
 	})
 
+	// Sync & device routes (JWT required)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+
+		r.Get("/sync/messages", handleSyncMessages)
+		r.Get("/sync/status", handleSyncStatus)
+		r.Post("/devices/force-revoke", handleForceRevokeDevice)
+	})
+
 	port := os.Getenv("MESSAGE_SERVICE_PORT")
 	if port == "" {
 		port = "8082"
@@ -132,65 +135,6 @@ func main() {
 	srv.Shutdown(ctx)
 }
 
-// ─── WebSocket Hub ───────────────────────────────────────────────────────────
-
-func (h *wsHub) run() {
-	ticker := time.NewTicker(30 * time.Second)
-	for range ticker.C {
-		h.mu.RLock()
-		for chatID, clients := range h.clients {
-			for client := range clients {
-				select {
-				case client.send <- []byte(`{"type":"ping"}`):
-				default:
-					close(client.send)
-					delete(clients, client)
-				}
-			}
-			if len(clients) == 0 {
-				delete(h.clients, chatID)
-			}
-		}
-		h.mu.RUnlock()
-	}
-}
-
-func (h *wsHub) register(chatID string, client *wsClient) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.clients[chatID] == nil {
-		h.clients[chatID] = make(map[*wsClient]bool)
-	}
-	h.clients[chatID][client] = true
-}
-
-func (h *wsHub) unregister(chatID string, client *wsClient) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if clients, ok := h.clients[chatID]; ok {
-		delete(clients, client)
-		close(client.send)
-	}
-}
-
-func (h *wsHub) broadcast(chatID string, message []byte, excludeUserID string) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	if clients, ok := h.clients[chatID]; ok {
-		for client := range clients {
-			if client.userID == excludeUserID {
-				continue
-			}
-			select {
-			case client.send <- message:
-			default:
-				close(client.send)
-				delete(clients, client)
-			}
-		}
-	}
-}
-
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" {
@@ -202,6 +146,11 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "invalid token", http.StatusUnauthorized)
 		return
+	}
+
+	deviceID := claims.DeviceID
+	if deviceID == "" {
+		deviceID = "unknown-" + claims.UserID
 	}
 
 	chatID := r.URL.Query().Get("chat_id")
@@ -217,13 +166,14 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := &wsClient{
-		conn:   conn,
-		userID: claims.UserID,
-		chatID: chatID,
-		send:   make(chan []byte, 256),
+		conn:     conn,
+		userID:   claims.UserID,
+		deviceID: deviceID,
+		chatIDs:  map[string]bool{chatID: true},
+		send:     make(chan []byte, 256),
 	}
 
-	hub.register(chatID, client)
+	hub.register(client)
 
 	go client.writePump()
 	go client.readPump()
@@ -258,7 +208,7 @@ func (c *wsClient) writePump() {
 
 func (c *wsClient) readPump() {
 	defer func() {
-		hub.unregister(c.chatID, c)
+		hub.removeClient(c)
 		c.conn.Close()
 	}()
 
@@ -283,7 +233,17 @@ func (c *wsClient) readPump() {
 		switch wsMsg.Type {
 		case "typing.start", "typing.stop":
 			data, _ := json.Marshal(wsMsg)
-			hub.broadcast(c.chatID, data, c.userID)
+			for chatID := range c.chatIDs {
+				hub.broadcastToChat(chatID, data, c.userID)
+			}
+		case "subscribe":
+			if chatID, ok := wsMsg.Payload.(string); ok {
+				hub.subscribeToChat(c, chatID)
+			}
+		case "unsubscribe":
+			if chatID, ok := wsMsg.Payload.(string); ok {
+				hub.unsubscribeFromChat(c, chatID)
+			}
 		case "pong":
 			c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		}
@@ -337,6 +297,9 @@ func handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	if req.MediaID != "" {
 		msg.MediaID = req.MediaID
 	}
+	if len(req.RecipientIDs) > 0 {
+		msg.RecipientIDs = req.RecipientIDs
+	}
 
 	if err := database.GlobalStore.InsertMessage(context.Background(), msg); err != nil {
 		log.Printf("[messages] insert error: %v", err)
@@ -344,7 +307,7 @@ func handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Broadcast via WebSocket
+	// Broadcast via WebSocket to all devices in chat
 	wsPayload, _ := json.Marshal(model.WebSocketMessage{
 		Type: "message.new",
 		Payload: model.MessageResponse{
@@ -353,7 +316,11 @@ func handleSendMessage(w http.ResponseWriter, r *http.Request) {
 			Status: msg.Status, CreatedAt: msg.CreatedAt,
 		},
 	})
-	hub.broadcast(req.ChatID, wsPayload, userID)
+	hub.broadcastToChat(req.ChatID, wsPayload, userID)
+	// Multi-device fan-out: push to all recipient devices
+	for _, recipientID := range req.RecipientIDs {
+		hub.broadcastToUserDevices(recipientID, wsPayload, "")
+	}
 
 	writeJSON(w, http.StatusCreated, model.MessageResponse{
 		ID: msg.ID, ChatID: msg.ChatID, SenderID: msg.SenderID,
@@ -467,7 +434,7 @@ func handleEditMessage(w http.ResponseWriter, r *http.Request) {
 			"edited_at":    now,
 		},
 	})
-	hub.broadcast(msg.ChatID, wsPayload, userID)
+	hub.broadcastToChat(msg.ChatID, wsPayload, userID)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
@@ -507,7 +474,7 @@ func handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 			"status":     "deleted",
 		},
 	})
-	hub.broadcast(msg.ChatID, wsPayload, userID)
+	hub.broadcastToChat(msg.ChatID, wsPayload, userID)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
@@ -556,15 +523,15 @@ func handleReactToMessage(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 
-	// Broadcast to all including sender for consistency
-	hub.mu.RLock()
-	if clients, ok := hub.clients[""]; ok {
-		_ = clients
+	// Get message to find chat_id for broadcast
+	msg, _ := database.GlobalStore.GetMessage(ctx, messageID)
+	chatID := ""
+	if msg != nil {
+		chatID = msg.ChatID
 	}
-	for chatID := range hub.clients {
-		hub.broadcast(chatID, wsPayload, "")
+	if chatID != "" {
+		hub.broadcastToChat(chatID, wsPayload, "")
 	}
-	hub.mu.RUnlock()
 
 	writeJSON(w, http.StatusOK, map[string]any{"reactions": reactions})
 }
@@ -591,7 +558,7 @@ func handleMarkRead(w http.ResponseWriter, r *http.Request) {
 
 	msg, err := database.GlobalStore.GetMessage(context.Background(), messageID)
 	if err == nil {
-		hub.broadcast(msg.ChatID, wsPayload, userID)
+		hub.broadcastToChat(msg.ChatID, wsPayload, userID)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "read"})
@@ -641,4 +608,133 @@ func handleRemoveBookmark(w http.ResponseWriter, r *http.Request) {
 
 func handleListBookmarks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"bookmarks": []any{}})
+}
+
+func handleSyncMessages(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	after := r.URL.Query().Get("after")
+	limitStr := r.URL.Query().Get("limit")
+
+	limit := 50
+	if l, err := uuid.Parse(limitStr); err == nil {
+		_ = l
+	}
+
+	cursor := time.Now().Add(-30 * 24 * time.Hour) // default: 30 days back
+	if after != "" {
+		if t, err := time.Parse(time.RFC3339, after); err == nil {
+			cursor = t
+		}
+	}
+
+	ctx := context.Background()
+
+	// Get user's conversation IDs from Neon
+	var convIDs []string
+	if database.Pool != nil {
+		rows, err := database.Pool.Query(ctx,
+			`SELECT cp.conversation_id FROM conversation_participants cp
+			 JOIN conversations c ON c.id = cp.conversation_id
+			 WHERE cp.user_id = $1 ORDER BY c.last_message_at DESC NULLS LAST`,
+			model.ParseUUID(userID),
+		)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var convID string
+				rows.Scan(&convID)
+				convIDs = append(convIDs, convID)
+			}
+		}
+	}
+
+	if len(convIDs) == 0 {
+		writeJSON(w, http.StatusOK, model.SyncMessagesResponse{
+			Messages: []model.MessageResponse{},
+			HasMore:  false,
+		})
+		return
+	}
+
+	// Query messages from ScyllaDB for each conversation
+	allMessages := []*model.Message{}
+	for _, convID := range convIDs {
+		messages, err := database.GlobalStore.GetMessages(ctx, convID, cursor, limit)
+		if err != nil {
+			continue
+		}
+		allMessages = append(allMessages, messages...)
+	}
+
+	// Sort by created_at descending (newest first)
+	for i := 0; i < len(allMessages); i++ {
+		for j := i + 1; j < len(allMessages); j++ {
+			if allMessages[j].CreatedAt.After(allMessages[i].CreatedAt) {
+				allMessages[i], allMessages[j] = allMessages[j], allMessages[i]
+			}
+		}
+	}
+
+	// Trim to limit
+	if len(allMessages) > limit {
+		allMessages = allMessages[:limit]
+	}
+
+	resp := model.SyncMessagesResponse{
+		Messages: make([]model.MessageResponse, 0, len(allMessages)),
+		HasMore:  len(allMessages) >= limit,
+	}
+
+	for _, msg := range allMessages {
+		reactions, _ := database.GlobalStore.GetReactions(ctx, msg.ID)
+		resp.Messages = append(resp.Messages, model.MessageResponse{
+			ID: msg.ID, ChatID: msg.ChatID, SenderID: msg.SenderID,
+			Content: msg.Content, ContentType: msg.ContentType,
+			MediaURL: msg.MediaURL, MediaID: msg.MediaID,
+			ReplyToID: msg.ReplyToID, Status: msg.Status,
+			ModerationStatus: msg.ModerationStatus,
+			EditHistory:      msg.EditHistory,
+			IsDeleted:        msg.IsDeleted,
+			Reactions:        reactions,
+			CreatedAt:        msg.CreatedAt,
+			EditedAt:         msg.EditedAt,
+		})
+	}
+
+	if len(allMessages) > 0 {
+		resp.NextCursor = allMessages[len(allMessages)-1].CreatedAt.Format(time.RFC3339)
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func handleSyncStatus(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	_ = userID
+
+	writeJSON(w, http.StatusOK, model.SyncStatusResponse{
+		Statuses: []model.StatusEntry{},
+		HasMore:  false,
+	})
+}
+
+func handleForceRevokeDevice(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+
+	var req struct {
+		DeviceID string `json:"device_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+		return
+	}
+
+	if req.DeviceID == "" {
+		writeError(w, http.StatusBadRequest, "VALIDATION", "device_id is required")
+		return
+	}
+
+	hub.disconnectDevice(userID, req.DeviceID)
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }

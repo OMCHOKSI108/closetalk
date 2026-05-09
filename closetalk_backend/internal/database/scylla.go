@@ -54,6 +54,7 @@ func InitScyllaSchema() error {
 			message_id      UUID,
 			sender_id       TEXT,
 			sender_device_id TEXT,
+			recipient_ids   TEXT,             -- JSON array of recipient user IDs
 			content         TEXT,
 			content_type    TEXT,
 			media_url       TEXT,

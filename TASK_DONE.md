@@ -152,3 +152,54 @@
 - [x] `go vet ./...` — zero issues
 - [x] `go build ./cmd/auth-service/` — builds clean with group routes
 - [x] `go build ./cmd/message-service/` — still builds clean
+
+---
+
+## 2026-05-09 — Multi-Device Sync System
+
+**Files created:**
+- `closetalk_backend/cmd/message-service/hub.go` — Multi-device WebSocket hub (byChat + byUser maps, device-aware broadcasting)
+- `closetalk_app/lib/models/device.dart` — Device, LinkDeviceResponse Dart models
+- `closetalk_app/lib/services/auth_service.dart` — Auth REST client (link/list/revoke devices)
+- `closetalk_app/lib/services/sync_service.dart` — Sync service with cursor-based pagination + exponential backoff
+- `closetalk_app/lib/screens/chat/device_link_screen.dart` — Link new device screen
+- `closetalk_app/lib/screens/settings/device_management_screen.dart` — List/manage/revoke devices
+
+**Files modified:**
+- `closetalk_backend/cmd/message-service/main.go` — Replaced old hub with multi-device hub, added sync endpoints
+- `closetalk_backend/internal/database/scylla.go` — Added `recipient_ids` column to messages table
+- `closetalk_backend/internal/database/scylla_store.go` — Updated InsertMessage with recipient_ids JSON serialization
+- `closetalk_backend/internal/model/message.go` — Added RecipientIDs, SyncMessagesRequest/Response models
+
+**Multi-device hub features:**
+- Tracks clients by `(chatID)` for chat broadcasting AND `(userID, deviceID)` for user-level fan-out
+- `broadcastToChat(chatID, msg, excludeUserID)` — existing chat broadcast behavior
+- `broadcastToUserDevices(userID, msg, excludeDeviceID)` — pushes to ALL devices of a recipient
+- `disconnectDevice(userID, deviceID)` — force-close a specific device's WebSocket connection
+- `subscribeToChat / unsubscribeFromChat` — subscribe/unsubscribe to additional chat rooms
+- WebSocket protocol: `subscribe`/`unsubscribe` message types for dynamic chat joining
+
+**New endpoints (added to message-service):**
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/sync/messages?after=cursor` | Incremental sync — fetches messages across all user's conversations |
+| GET | `/sync/status?after=cursor` | Status sync (stub) |
+| POST | `/devices/force-revoke` | Force-close a device's WebSocket connections |
+
+**Sync behavior:**
+- Queries Neon for user's conversation participants, then ScyllaDB for messages in each conversation
+- Default: syncs last 30 days of messages
+- Cursor-based pagination (50 per page)
+- Sorted by created_at descending (newest first)
+- Exponential backoff on retry (Flutter client: 2^n * 1s, max 5 retries)
+
+**Flutter SyncService:**
+- `syncMessages()` — fetch next batch since last cursor
+- `fullSync()` — fetches ALL messages in batches with progress callback
+- `resetCursor()` — reset sync state (e.g. after device link)
+- Auto-retry with exponential backoff on connection failure
+
+**Verification:**
+- [x] `go vet ./...` — zero issues
+- [x] `go build ./cmd/auth-service/` — builds clean (17MB)
+- [x] `go build ./cmd/message-service/` — builds clean

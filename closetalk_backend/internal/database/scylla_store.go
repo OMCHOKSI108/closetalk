@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -16,12 +17,17 @@ func NewScyllaStore() *ScyllaMessageStore {
 }
 
 func (s *ScyllaMessageStore) InsertMessage(ctx context.Context, msg *model.Message) error {
+	recipientIDs := ""
+	if len(msg.RecipientIDs) > 0 {
+		b, _ := json.Marshal(msg.RecipientIDs)
+		recipientIDs = string(b)
+	}
 	return Scylla.Query(
 		`INSERT INTO closetalk.messages (chat_id, created_at, message_id, sender_id, sender_device_id,
-		 content, content_type, media_url, media_id, reply_to_id, status, moderation_status, is_deleted)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 recipient_ids, content, content_type, media_url, media_id, reply_to_id, status, moderation_status, is_deleted)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		msg.ChatID, msg.CreatedAt, msg.ID, msg.SenderID, msg.SenderDeviceID,
-		msg.Content, msg.ContentType, msg.MediaURL, msg.MediaID, msg.ReplyToID,
+		recipientIDs, msg.Content, msg.ContentType, msg.MediaURL, msg.MediaID, msg.ReplyToID,
 		msg.Status, msg.ModerationStatus, msg.IsDeleted,
 	).WithContext(ctx).Exec()
 }
