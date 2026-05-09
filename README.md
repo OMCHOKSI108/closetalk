@@ -31,81 +31,135 @@ CloseTalk fixes every major problem WhatsApp users have faced — TCP head-of-li
 | Layer | Technology |
 |---|---|
 | Frontend | Flutter (Dart) — Android, iOS, Web, Desktop |
-| Backend | Node.js 25 / Go 1.26 on ECS Fargate (Graviton5) |
-| Transport | WebTransport (QUIC) + SSE/HTTP-3 + WebSocket fallback |
-| Relational DB | Neon Serverless PostgreSQL (RLS, copy-on-write branching) |
-| NoSQL | ScyllaDB Cloud (DynamoDB-compatible, 50% cheaper, 10x lower latency) |
-| Cache | Valkey 8.1 (ElastiCache — 28% better density than Redis) |
+| Backend | Go 1.26 on ECS Fargate |
+| Transport | WebSocket + HTTP/REST |
+| Relational DB | RDS PostgreSQL 17 |
+| NoSQL | Amazon DynamoDB (messages, reactions, reads, bookmarks) |
+| Cache | Amazon ElastiCache Valkey 8.1 |
 | AI | Amazon Bedrock AgentCore (Claude 3.5 Haiku / Nova Micro) |
 | Events | SQS FIFO + EventBridge Pipes + SNS |
-| Networking | AWS Global Accelerator (sub-50ms global latency) |
+| Networking | AWS ALB + VPC |
 | CDN | Amazon CloudFront |
 
 ## Architecture
 
-```
-Clients ──▶ Global Accelerator ──▶ ALB ──▶ Services (ECS Fargate)
-                                              │
-                               ┌──────────────┼──────────────┐
-                               ▼              ▼              ▼
-                         Neon PostgreSQL  ScyllaDB Cloud  Valkey 8.1
-                         (Users/Groups)   (Messages)     (Session/Presence)
-                                              │
-                                         EventBridge Pipes
-                                              │
-                                    ┌─────────┴─────────┐
-                                    ▼                   ▼
-                              Bedrock AI            SNS Push
-                           (Moderation/Agent)     (Notifications)
+```mermaid
+graph TB
+    subgraph "Clients"
+        FA[Flutter App<br/>Android/iOS/Web/Desktop]
+    end
+
+    subgraph "AWS Cloud"
+        subgraph "Networking"
+            ALB[ALB<br/>Application Load Balancer]
+        end
+
+        subgraph "Compute - ECS Fargate"
+            AS[auth-service<br/>Port 8081]
+            MS[message-service<br/>Port 8082]
+        end
+
+        subgraph "Data Layer"
+            RDS[(RDS PostgreSQL 17<br/>Users, Groups, Devices)]
+            DDB[(DynamoDB<br/>Messages, Reactions,<br/>Reads, Bookmarks)]
+            VALKEY[(ElastiCache Valkey<br/>Sessions, Rate Limits)]
+        end
+
+        subgraph "Monitoring"
+            CW[CloudWatch<br/>Logs & Metrics]
+        end
+    end
+
+    FA -->|HTTPS/WSS| ALB
+    ALB -->|/auth/* /devices/* /groups/*| AS
+    ALB -->|/messages/* /bookmarks/* /sync/* /ws| MS
+    AS --> RDS
+    AS --> VALKEY
+    MS --> DDB
+    MS --> VALKEY
+    AS --> CW
+    MS --> CW
 ```
 
-The system uses a **disaggregated architecture** — each layer scales independently. Compute is stateless (just add more Fargate tasks). Data is routed to the best engine for each job: ACID metadata to PostgreSQL, high-throughput messages to ScyllaDB, low-latency session state to Valkey.
+The system uses a **disaggregated architecture** — each layer scales independently. Compute is stateless (just add more Fargate tasks). Data is routed to the best engine for each job: ACID metadata to RDS PostgreSQL, high-throughput messages to DynamoDB, low-latency session state to ElastiCache Valkey.
+
+## Backend API
+
+**Production URL:** [`https://d34etjxuah5cvp.cloudfront.net/`](https://d34etjxuah5cvp.cloudfront.net/)
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/` | GET | API info |
+| `/health` | GET | Health check |
+| `/auth/register` | POST | Register user |
+| `/auth/login` | POST | Login |
+| `/auth/refresh` | POST | Refresh JWT |
+| `/messages/{chatId}` | GET | Get messages |
+| `/bookmarks` | GET | List bookmarks |
+| `/ws` | GET | WebSocket |
 
 ## Getting Started
 
 ### Prerequisites
 
-- Flutter SDK 3.11+
-- Dart 3.11+
-- Docker (for backend development)
+- Go 1.26+
+- Docker & Docker Compose
+- Terraform 1.6+ (for AWS deployment)
+- AWS CLI (for AWS deployment)
 
-### Run the Flutter App
-
-```bash
-cd closetalk_app
-flutter pub get
-flutter run
-```
-
-### Run Tests
+### Run Locally with Docker Compose
 
 ```bash
-cd closetalk_app
-flutter test
+cd closetalk_backend
+docker-compose up
 ```
+
+This starts: auth-service (8081), message-service (8082), PostgreSQL 17, Valkey 8.1, and DynamoDB Local.
+
+### Deploy to AWS
+
+```bash
+# 1. Provision infrastructure
+cd terraform
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your values
+terraform init
+terraform apply
+
+# 2. Push images and deploy
+# Push to ECR and deploy via GitHub Actions
+# (or manually with the script below)
+```
+
+See [docs/infrastructure.md](docs/infrastructure.md) for full deployment details.
 
 ## Project Structure
 
 ```
 closetalk/
-├── closetalk_app/       # Flutter app (Android, iOS, Web, Desktop)
-├── closetalk_backend/   # Backend services (placeholder)
-├── closetalk_frontend/  # Web admin dashboard (placeholder)
-├── docs/
-│   ├── architecture.md       # System architecture deep-dive
-│   ├── architecture-flow.md  # Architecture diagrams (Mermaid)
-│   ├── security.md           # Security, compliance & maintenance
-│   ├── requirements.md       # Functional & non-functional requirements
-│   ├── planning.md           # Project planning checklist
-│   ├── product-vision.md     # Product vision & user experience
-│   └── closetalk-architecture.md  # Full 2026 architectural standard
+├── closetalk_app/         # Flutter app (Android, iOS, Web, Desktop)
+├── closetalk_backend/     # Go backend services
+│   ├── cmd/
+│   │   ├── auth-service/      # Authentication + groups API
+│   │   └── message-service/   # Messaging + WebSocket API
+│   ├── internal/
+│   │   ├── auth/              # JWT, password hashing
+│   │   ├── database/          # Neon, DynamoDB, Valkey, MemStore
+│   │   ├── middleware/        # Auth, logging, rate limiting
+│   │   └── model/             # Data models
+│   ├── infrastructure/migrations/  # SQL migrations
+│   ├── docker-compose.yml     # Local dev environment
+│   └── Dockerfile             # Multi-stage build
+├── terraform/              # AWS infrastructure as code
+├── .github/workflows/      # CI/CD pipelines
+├── docs/                   # Documentation
 └── README.md
 ```
 
 ## Documentation
 
 | Document | Description |
-|---|---|
+|---|---|---|
 | Architecture | docs/architecture.md |
 | Architecture Diagrams (Mermaid) | docs/architecture-flow.md |
 | Security, Compliance & Maintenance | docs/security.md |
@@ -115,6 +169,7 @@ closetalk/
 | Multi-Device Sync Protocol | docs/multi-device-sync.md |
 | WhatsApp Gap Analysis & Fixes | docs/whatsapp-gap-analysis.md |
 | Full Architectural Standard (PDF extract) | docs/closetalk-architecture.md |
+| Deployment Infrastructure | docs/infrastructure.md |
 
 ## Cost Overview
 

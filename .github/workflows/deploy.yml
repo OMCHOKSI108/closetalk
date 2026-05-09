@@ -1,0 +1,105 @@
+name: Deploy to AWS ECS
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "closetalk_backend/**"
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Service to deploy (all, auth-service, message-service)"
+        required: true
+        default: "all"
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_AUTH_REPO: ${{ secrets.ECR_AUTH_REPO }}
+  ECR_MESSAGE_REPO: ${{ secrets.ECR_MESSAGE_REPO }}
+  ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
+  ECS_AUTH_SERVICE: auth-service
+  ECS_MESSAGE_SERVICE: message-service
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - name: auth-service
+            dockerfile: closetalk_backend/Dockerfile
+            context: closetalk_backend
+            port: 8081
+            task_def: ${{ secrets.ECS_AUTH_TASK_DEF }}
+          - name: message-service
+            dockerfile: closetalk_backend/Dockerfile
+            context: closetalk_backend
+            port: 8082
+            task_def: ${{ secrets.ECS_MESSAGE_TASK_DEF }}
+      fail-fast: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          REPO_NAME="${{ matrix.service.name == 'auth-service' && env.ECR_AUTH_REPO || env.ECR_MESSAGE_REPO }}"
+          IMAGE="$ECR_REGISTRY/$REPO_NAME:$IMAGE_TAG"
+
+          docker build \
+            -f "${{ matrix.service.dockerfile }}" \
+            --build-arg SERVICE=${{ matrix.service.name }} \
+            --build-arg PORT=${{ matrix.service.port }} \
+            -t "$IMAGE" \
+            "${{ matrix.service.context }}"
+
+          docker push "$IMAGE"
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+
+      - name: Download task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "${{ matrix.service.task_def }}" \
+            --query taskDefinition \
+            --output json > task-def.json
+
+      - name: Fill in new image ID
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-def.json
+          container-name: ${{ matrix.service.name }}
+          image: ${{ steps.build-image.outputs.image }}
+
+      - name: Deploy to Amazon ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ matrix.service.name }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Verify deployment
+        run: |
+          echo "Deployed ${{ matrix.service.name }} successfully!"
+          echo "Image: ${{ steps.build-image.outputs.image }}"

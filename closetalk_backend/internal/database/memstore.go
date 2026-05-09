@@ -161,4 +161,25 @@ func (s *MemStore) RemoveBookmark(ctx context.Context, userID string, messageID 
 	return nil
 }
 
+func (s *MemStore) ListBookmarks(ctx context.Context, userID string) ([]model.BookmarkResponse, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	entries, ok := s.bookmarks[userID]
+	if !ok {
+		return []model.BookmarkResponse{}, nil
+	}
+
+	result := make([]model.BookmarkResponse, 0, len(entries))
+	for _, entry := range entries {
+		result = append(result, model.BookmarkResponse{
+			MessageID: entry.MessageID.String(),
+			ChatID:    entry.ChatID,
+			Preview:   entry.Preview,
+			CreatedAt: entry.CreatedAt,
+		})
+	}
+	return result, nil
+}
+
 var GlobalStore MessageStore = NewMemStore()

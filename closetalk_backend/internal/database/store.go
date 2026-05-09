@@ -20,4 +20,5 @@ type MessageStore interface {
 	MarkRead(ctx context.Context, messageID uuid.UUID, userID string) error
 	BookmarkMessage(ctx context.Context, userID string, messageID uuid.UUID, chatID string, preview string) error
 	RemoveBookmark(ctx context.Context, userID string, messageID uuid.UUID) error
+	ListBookmarks(ctx context.Context, userID string) ([]model.BookmarkResponse, error)
 }

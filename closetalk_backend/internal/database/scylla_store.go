@@ -156,6 +156,27 @@ func (s *ScyllaMessageStore) RemoveBookmark(ctx context.Context, userID string, 
 	).WithContext(ctx).Exec()
 }
 
+func (s *ScyllaMessageStore) ListBookmarks(ctx context.Context, userID string) ([]model.BookmarkResponse, error) {
+	iter := Scylla.Query(
+		`SELECT message_id, chat_id, content_preview, created_at FROM closetalk.bookmarks WHERE user_id = ?`,
+		userID,
+	).WithContext(ctx).Iter()
+
+	var result []model.BookmarkResponse
+	var msgID uuid.UUID
+	var chatID, preview string
+	var createdAt time.Time
+	for iter.Scan(&msgID, &chatID, &preview, &createdAt) {
+		result = append(result, model.BookmarkResponse{
+			MessageID: msgID.String(),
+			ChatID:    chatID,
+			Preview:   preview,
+			CreatedAt: createdAt,
+		})
+	}
+	return result, iter.Close()
+}
+
 // Ensure compile-time interface compliance
 var _ MessageStore = (*ScyllaMessageStore)(nil)
 var _ MessageStore = (*MemStore)(nil)

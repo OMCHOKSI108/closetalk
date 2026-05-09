@@ -79,6 +79,10 @@ type RecoverRequest struct {
 	Code string `json:"code"`
 }
 
+type RecoverEmailRequest struct {
+	Email string `json:"email"`
+}
+
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password"`
 	NewPassword string `json:"new_password"`

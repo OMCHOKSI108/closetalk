@@ -30,6 +30,19 @@ Desktop.ini
 *.pem
 *.key
 
+# ===== Terraform =====
+*.tfvars
+!*.tfvars.example
+*.tfstate
+*.tfstate.*
+tfplan
+.terraform/
+*-task-def*.json
+
+# ===== Build artifacts =====
+build/
+*.bin
+
 # ===== Go artifacts (inside closetalk_backend/) =====
 *.exe
 *.exe~

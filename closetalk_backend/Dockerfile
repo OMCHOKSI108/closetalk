@@ -11,6 +11,7 @@ RUN go mod download
 COPY . .
 
 ARG SERVICE=auth-service
+ARG PORT=8081
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -ldflags="-s -w" -o /app ./cmd/$SERVICE
 
@@ -21,12 +22,11 @@ RUN apk add --no-cache ca-certificates tzdata
 RUN adduser -D -g '' closetalk
 USER closetalk
 
-WORKDIR /app
-COPY --from=builder /app .
+COPY --from=builder /app /app/service
 
-EXPOSE 8081
+EXPOSE $PORT
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8081/health || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://localhost:$PORT/health || exit 1
 
-ENTRYPOINT ["/app"]
+ENTRYPOINT ["/app/service"]

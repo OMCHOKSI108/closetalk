@@ -7,6 +7,7 @@ services:
       dockerfile: Dockerfile
       args:
         SERVICE: auth-service
+        PORT: 8081
     ports:
       - "8081:8081"
     environment:
@@ -45,18 +46,29 @@ services:
       dockerfile: Dockerfile
       args:
         SERVICE: message-service
+        PORT: 8082
     ports:
       - "8082:8082"
     environment:
       MESSAGE_SERVICE_PORT: "8082"
-      SCYLLA_HOSTS: "scylla:9042"
       VALKEY_ADDR: "valkey:6379"
       JWT_SECRET: "closetalk-dev-secret-change-in-production"
+      AWS_REGION: "us-east-1"
+      DYNAMODB_ENDPOINT: "http://dynamodb-local:8000"
+      AWS_ACCESS_KEY_ID: "dummy"
+      AWS_SECRET_ACCESS_KEY: "dummy"
     depends_on:
-      scylla:
-        condition: service_healthy
       valkey:
         condition: service_healthy
+      dynamodb-local:
+        condition: service_started
+    restart: unless-stopped
+
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    ports:
+      - "8000:8000"
+    command: ["-jar", "DynamoDBLocal.jar", "-inMemory", "-sharedDb"]
     restart: unless-stopped
 
   valkey:
@@ -72,24 +84,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  scylla:
-    image: scylladb/scylla:6.2
-    ports:
-      - "9042:9042"
-    environment:
-      SCYLLA_ALTERNATOR_PORT: "8043"
-      SCYLLA_ALTERNATOR_ENABLED: "1"
-    volumes:
-      - scylla_data:/var/lib/scylla
-    healthcheck:
-      test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
-    restart: unless-stopped
-
 volumes:
   neon_data:
   valkey_data:
-  scylla_data:

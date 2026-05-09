@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -35,13 +36,13 @@ func main() {
 	_ = godotenv.Load()
 	auth.InitJWT()
 
-	// Try ScyllaDB, fall back to in-memory
-	if err := database.ConnectScylla(); err != nil {
-		log.Printf("[warn] scylla not available, using in-memory store: %v", err)
+	// Try DynamoDB, fall back to in-memory
+	if err := database.ConnectDynamoDB(); err != nil {
+		log.Printf("[warn] dynamodb not available, using in-memory store: %v", err)
 	} else {
-		database.InitScyllaSchema()
-		database.GlobalStore = database.NewScyllaStore()
-		defer database.CloseScylla()
+		database.InitDynamoDBSchema()
+		database.GlobalStore = database.NewDynamoDBStore()
+		defer database.CloseDynamoDB()
 	}
 
 	// Connect Valkey for presence
@@ -345,8 +346,8 @@ func handleGetMessages(w http.ResponseWriter, r *http.Request) {
 
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if parsed, err := uuid.Parse(l); err == nil {
-			_ = parsed
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
 		}
 	}
 
@@ -607,7 +608,16 @@ func handleRemoveBookmark(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleListBookmarks(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"bookmarks": []any{}})
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	result, err := database.GlobalStore.ListBookmarks(context.Background(), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to list bookmarks")
+		return
+	}
+	if result == nil {
+		result = []model.BookmarkResponse{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"bookmarks": result})
 }
 
 func handleSyncMessages(w http.ResponseWriter, r *http.Request) {
@@ -616,8 +626,8 @@ func handleSyncMessages(w http.ResponseWriter, r *http.Request) {
 	limitStr := r.URL.Query().Get("limit")
 
 	limit := 50
-	if l, err := uuid.Parse(limitStr); err == nil {
-		_ = l
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+		limit = l
 	}
 
 	cursor := time.Now().Add(-30 * 24 * time.Hour) // default: 30 days back
@@ -710,10 +720,44 @@ func handleSyncMessages(w http.ResponseWriter, r *http.Request) {
 
 func handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
-	_ = userID
+	ctx := context.Background()
+
+	statuses := []model.StatusEntry{}
+
+	if database.Pool != nil {
+		rows, err := database.Pool.Query(ctx, `
+			SELECT DISTINCT cp2.user_id
+			FROM conversation_participants cp1
+			JOIN conversation_participants cp2 ON cp1.conversation_id = cp2.conversation_id
+			WHERE cp1.user_id = $1 AND cp2.user_id != $1
+			LIMIT 50
+		`, model.ParseUUID(userID))
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var participantID string
+				if err := rows.Scan(&participantID); err != nil {
+					continue
+				}
+				if database.Valkey != nil {
+					count, _ := database.Valkey.SCard(ctx, "user_sessions:"+participantID).Result()
+					if count > 0 {
+						statuses = append(statuses, model.StatusEntry{
+							ID:        participantID + "-online",
+							UserID:    participantID,
+							Type:      "presence",
+							Content:   "online",
+							CreatedAt: time.Now(),
+							ExpiresAt: time.Now().Add(5 * time.Minute),
+						})
+					}
+				}
+			}
+		}
+	}
 
 	writeJSON(w, http.StatusOK, model.SyncStatusResponse{
-		Statuses: []model.StatusEntry{},
+		Statuses: statuses,
 		HasMore:  false,
 	})
 }

@@ -2,23 +2,70 @@ package main
 
 import (
 	"context"
+	"crypto"
+	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
+	"math/big"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sesv2"
+	"github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 
 	"github.com/OMCHOKSI108/closetalk/internal/auth"
 	"github.com/OMCHOKSI108/closetalk/internal/database"
 	"github.com/OMCHOKSI108/closetalk/internal/middleware"
 	"github.com/OMCHOKSI108/closetalk/internal/model"
+)
+
+type googleKeysResponse struct {
+	Keys []googleKey `json:"keys"`
+}
+
+type googleKey struct {
+	Kty string `json:"kty"`
+	Alg string `json:"alg"`
+	Use string `json:"use"`
+	Kid string `json:"kid"`
+	N   string `json:"n"`
+	E   string `json:"e"`
+}
+
+type googleTokenPayload struct {
+	Iss string `json:"iss"`
+	Sub string `json:"sub"`
+	Azp string `json:"azp"`
+	Aud string `json:"aud"`
+	Iat string `json:"iat"`
+	Exp string `json:"exp"`
+	Email string `json:"email"`
+	EmailVerified string `json:"email_verified"`
+	Name string `json:"name"`
+	Picture string `json:"picture"`
+	GivenName string `json:"given_name"`
+	FamilyName string `json:"family_name"`
+}
+
+// Cache Google's public keys (refreshed every hour)
+var (
+	googleKeysCache     []googleKey
+	googleKeysCacheTime time.Time
 )
 
 func main() {
@@ -61,6 +108,26 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+
+	// Root API info
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"service": "Closetalk",
+			"version": "1.0.0",
+			"endpoints": map[string]string{
+				"health":           "/health",
+				"auth_register":    "/auth/register",
+				"auth_login":       "/auth/login",
+				"auth_refresh":     "/auth/refresh",
+				"auth_recover":     "/auth/recover",
+				"messages":         "/messages/{chatId}",
+				"bookmarks":        "/bookmarks",
+				"websocket":        "/ws",
+			},
+			"documentation": "https://github.com/OMCHOKSI108/closetalk",
+		})
+	})
 
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -300,13 +367,210 @@ func handleOAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Verify OAuth code with provider (Google/Apple/GitHub)
-	// For MVP, return a stub response indicating OAuth is not yet implemented
-	writeJSON(w, http.StatusOK, map[string]string{
-		"message":  "OAuth flow not fully implemented yet",
-		"provider": req.Provider,
+	if req.Code == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "code is required"})
+		return
+	}
+
+	switch req.Provider {
+	case "google":
+		handleGoogleOAuth(w, r, req.Code)
+	case "apple":
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "NOT_IMPLEMENTED", Message: "Apple OAuth not yet implemented"})
+	case "github":
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "NOT_IMPLEMENTED", Message: "GitHub OAuth not yet implemented"})
+	default:
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "INVALID_PROVIDER", Message: "unsupported provider: " + req.Provider})
+	}
+}
+
+func handleGoogleOAuth(w http.ResponseWriter, r *http.Request, idToken string) {
+	payload, err := verifyGoogleIDToken(idToken)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, &model.AppError{Code: "OAUTH_FAILED", Message: "failed to verify Google token: " + err.Error()})
+		return
+	}
+
+	if payload.EmailVerified != "true" {
+		writeError(w, http.StatusForbidden, &model.AppError{Code: "EMAIL_NOT_VERIFIED", Message: "Google email not verified"})
+		return
+	}
+
+	email := payload.Email
+	displayName := payload.Name
+	if displayName == "" {
+		displayName = strings.Split(email, "@")[0]
+	}
+	avatarURL := payload.Picture
+
+	ctx := context.Background()
+
+	// Check if user exists
+	var userID string
+	err = database.Pool.QueryRow(ctx,
+		`SELECT id FROM users WHERE email = $1`, email,
+	).Scan(&userID)
+
+	if err != nil {
+		// Create new user
+		userID = uuid.New().String()
+		now := time.Now()
+
+		_, err = database.Pool.Exec(ctx,
+			`INSERT INTO users (id, email, display_name, avatar_url, oauth_provider, is_admin, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, 'google', false, $5, $5)`,
+			model.ParseUUID(userID), email, displayName, avatarURL, now,
+		)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to create user"})
+			return
+		}
+
+		// Insert default user_settings
+		database.Pool.Exec(ctx,
+			`INSERT INTO user_settings (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+			model.ParseUUID(userID),
+		)
+	}
+
+	// Generate tokens
+	accessToken, _ := auth.GenerateAccessToken(model.ParseUUID(userID), false)
+	refreshToken, _ := auth.GenerateRefreshToken()
+	database.StoreSession(ctx, refreshToken, userID, "", 7*24*time.Hour)
+
+	// Fetch user for response
+	var user model.User
+	err = database.Pool.QueryRow(ctx,
+		`SELECT id, email, display_name, avatar_url, bio, is_admin, created_at FROM users WHERE id = $1`,
+		model.ParseUUID(userID),
+	).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.Bio, &user.IsAdmin, &user.CreatedAt)
+
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to fetch user"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, model.AuthResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ExpiresIn:    900,
+		User: model.UserResponse{
+			ID:          user.ID,
+			Email:       ptr(email),
+			DisplayName: user.DisplayName,
+			AvatarURL:   user.AvatarURL,
+			Bio:         user.Bio,
+			IsAdmin:     user.IsAdmin,
+			CreatedAt:   user.CreatedAt,
+		},
 	})
 }
+
+func ptr(s string) *string { return &s }
+
+func verifyGoogleIDToken(idToken string) (*googleTokenPayload, error) {
+	// Fetch Google's public keys if cache is empty or older than 1 hour
+	if len(googleKeysCache) == 0 || time.Since(googleKeysCacheTime) > time.Hour {
+		resp, err := http.Get("https://www.googleapis.com/oauth2/v3/certs")
+		if err != nil {
+			return nil, fmt.Errorf("fetch google keys: %w", err)
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("read google keys: %w", err)
+		}
+
+		var keysResp googleKeysResponse
+		if err := json.Unmarshal(body, &keysResp); err != nil {
+			return nil, fmt.Errorf("parse google keys: %w", err)
+		}
+
+		googleKeysCache = keysResp.Keys
+		googleKeysCacheTime = time.Now()
+	}
+
+	// Decode JWT parts
+	parts := strings.Split(idToken, ".")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("invalid token format")
+	}
+
+	// Parse header to find key ID
+	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, fmt.Errorf("decode header: %w", err)
+	}
+
+	var header struct {
+		Kid string `json:"kid"`
+		Alg string `json:"alg"`
+	}
+	if err := json.Unmarshal(headerJSON, &header); err != nil {
+		return nil, fmt.Errorf("parse header: %w", err)
+	}
+
+	// Find matching key
+	var matchedKey *googleKey
+	for i := range googleKeysCache {
+		if googleKeysCache[i].Kid == header.Kid {
+			matchedKey = &googleKeysCache[i]
+			break
+		}
+	}
+	if matchedKey == nil {
+		return nil, fmt.Errorf("key not found for kid: %s", header.Kid)
+	}
+
+	// Verify RSA signature
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return nil, fmt.Errorf("decode signature: %w", err)
+	}
+
+	// Decode RSA public key
+	nBytes, err := base64.RawURLEncoding.DecodeString(matchedKey.N)
+	if err != nil {
+		return nil, fmt.Errorf("decode n: %w", err)
+	}
+	eBytes, err := base64.RawURLEncoding.DecodeString(matchedKey.E)
+	if err != nil {
+		return nil, fmt.Errorf("decode e: %w", err)
+	}
+
+	pubKey := &rsa.PublicKey{
+		N: new(big.Int).SetBytes(nBytes),
+		E: int(new(big.Int).SetBytes(eBytes).Int64()),
+	}
+
+	// Verify signature
+	message := parts[0] + "." + parts[1]
+	hash := sha256.Sum256([]byte(message))
+	if err := rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, hash[:], signature); err != nil {
+		return nil, fmt.Errorf("invalid signature: %w", err)
+	}
+
+	// Decode payload
+	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("decode payload: %w", err)
+	}
+
+	var payload googleTokenPayload
+	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
+		return nil, fmt.Errorf("parse payload: %w", err)
+	}
+
+	// Verify issuer
+	if payload.Iss != "https://accounts.google.com" && payload.Iss != "accounts.google.com" {
+		return nil, fmt.Errorf("invalid issuer: %s", payload.Iss)
+	}
+
+	return &payload, nil
+}
+
+
 
 func handleRefresh(w http.ResponseWriter, r *http.Request) {
 	var req model.RefreshRequest
@@ -407,10 +671,91 @@ func handleRecover(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleRecoverEmail(w http.ResponseWriter, r *http.Request) {
-	// TODO: Send recovery email via AWS SES
+	var req model.RecoverEmailRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, model.ErrInvalidRequest)
+		return
+	}
+
+	if req.Email == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "email is required"})
+		return
+	}
+
+	ctx := context.Background()
+
+	// Always return success regardless of whether email exists (security)
+	var userID string
+	var displayName string
+	err := database.Pool.QueryRow(ctx,
+		`SELECT id, display_name FROM users WHERE email = $1`, req.Email,
+	).Scan(&userID, &displayName)
+
+	if err == nil {
+		// Generate a recovery token
+		recoveryToken, _ := auth.GenerateRefreshToken()
+		database.StoreSession(ctx, "recover:"+recoveryToken, userID, "", 15*time.Minute)
+
+		recoveryLink := fmt.Sprintf("https://d34etjxuah5cvp.cloudfront.net/auth/recover?token=%s", recoveryToken)
+
+		// Try to send email via SES
+		sesErr := sendSESEmail(ctx, req.Email, "CloseTalk Password Recovery",
+			fmt.Sprintf("Hi %s,\n\nClick the link below to reset your password:\n%s\n\nThis link expires in 15 minutes.\n\nIf you didn't request this, ignore this email.", displayName, recoveryLink),
+		)
+		if sesErr != nil {
+			log.Printf("[ses] failed to send recovery email to %s: %v", req.Email, sesErr)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{
 		"message": "recovery email sent (if account exists)",
 	})
+}
+
+var sesClient *sesv2.Client
+
+func getSESClient() *sesv2.Client {
+	if sesClient == nil {
+		cfg, err := config.LoadDefaultConfig(context.Background())
+		if err != nil {
+			log.Printf("[ses] failed to load config: %v", err)
+			return nil
+		}
+		sesClient = sesv2.NewFromConfig(cfg)
+	}
+	return sesClient
+}
+
+func sendSESEmail(ctx context.Context, to, subject, body string) error {
+	from := os.Getenv("SES_FROM_EMAIL")
+	if from == "" {
+		from = "noreply@closetalk.app"
+	}
+
+	client := getSESClient()
+	if client == nil {
+		return fmt.Errorf("SES client not initialized")
+	}
+
+	_, err := client.SendEmail(ctx, &sesv2.SendEmailInput{
+		FromEmailAddress: aws.String(from),
+		Destination: &types.Destination{
+			ToAddresses: []string{to},
+		},
+		Content: &types.EmailContent{
+			Simple: &types.Message{
+				Subject: &types.Content{
+					Data: aws.String(subject),
+				},
+				Body: &types.Body{
+					Text: &types.Content{
+						Data: aws.String(body),
+					},
+				},
+			},
+		},
+	})
+	return err
 }
 
 func handleChangePassword(w http.ResponseWriter, r *http.Request) {

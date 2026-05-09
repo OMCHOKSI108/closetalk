@@ -1,0 +1,5 @@
+aws_region  = "us-east-1"
+environment = "production"
+app_name    = "closetalk"
+jwt_secret  = "your-very-long-random-secret-here-change-me"
+db_password = "your-database-password-here-change-me"

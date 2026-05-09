@@ -85,6 +85,13 @@ type BookmarkRequest struct {
 	ChatID    string `json:"chat_id"`
 }
 
+type BookmarkResponse struct {
+	MessageID string    `json:"message_id"`
+	ChatID    string    `json:"chat_id"`
+	Preview   string    `json:"content_preview"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type WebSocketMessage struct {
 	Type    string `json:"type"`    // message.new | message.updated | message.status | typing.start | typing.stop
 	Payload any    `json:"payload"`
@@ -120,7 +127,8 @@ type SyncStatusResponse struct {
 type StatusEntry struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`
-	Type      string    `json:"type"`
+	Type      string    `json:"type"`      // text | image | video
 	Content   string    `json:"content"`
 	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
