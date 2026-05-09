@@ -1,0 +1,6 @@
+# CloseTalk Backend — Go
+*.exe
+*.exe~
+*.test
+*.out
+vendor/

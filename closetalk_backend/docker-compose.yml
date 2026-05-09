@@ -1,0 +1,95 @@
+version: "3.9"
+
+services:
+  auth-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: auth-service
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: "8081"
+      DATABASE_URL: "postgres://closetalk:closetalk@neon:5432/closetalk?sslmode=disable"
+      VALKEY_ADDR: "valkey:6379"
+      VALKEY_PASSWORD: ""
+      JWT_SECRET: "closetalk-dev-secret-change-in-production"
+    depends_on:
+      neon:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    restart: unless-stopped
+
+  neon:
+    image: postgres:17-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: closetalk
+      POSTGRES_PASSWORD: closetalk
+      POSTGRES_DB: closetalk
+    volumes:
+      - neon_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U closetalk -d closetalk"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  message-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: message-service
+    ports:
+      - "8082:8082"
+    environment:
+      MESSAGE_SERVICE_PORT: "8082"
+      SCYLLA_HOSTS: "scylla:9042"
+      VALKEY_ADDR: "valkey:6379"
+      JWT_SECRET: "closetalk-dev-secret-change-in-production"
+    depends_on:
+      scylla:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    restart: unless-stopped
+
+  valkey:
+    image: valkey/valkey:8.1-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  scylla:
+    image: scylladb/scylla:6.2
+    ports:
+      - "9042:9042"
+    environment:
+      SCYLLA_ALTERNATOR_PORT: "8043"
+      SCYLLA_ALTERNATOR_ENABLED: "1"
+    volumes:
+      - scylla_data:/var/lib/scylla
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+volumes:
+  neon_data:
+  valkey_data:
+  scylla_data:

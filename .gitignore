@@ -29,3 +29,17 @@ Desktop.ini
 .env.*.local
 *.pem
 *.key
+
+# ===== Go artifacts (inside closetalk_backend/) =====
+*.exe
+*.exe~
+*.test
+*.out
+vendor/
+
+# ===== Installer artifacts =====
+go-installer.msl
+
+# ===== NPM cruft (if accidentally created) =====
+package-lock.json
+package.json

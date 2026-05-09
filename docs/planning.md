@@ -40,7 +40,7 @@
 - [ ] **Choose backend runtime**
   - Option A: Node.js 25 (async I/O, large ecosystem)
   - Option B: Go 1.26 (performance, low memory)
-  - Decision: ____
+  - Decision: __B__
 
 - [ ] **Set up container orchestration**
   - AWS ECS Fargate (Graviton5 instances)

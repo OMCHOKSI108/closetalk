@@ -1,0 +1,156 @@
+class Message {
+  final String id;
+  final String chatId;
+  final String senderId;
+  final String content;
+  final String contentType;
+  final String? mediaUrl;
+  final String? mediaId;
+  final String? replyToId;
+  final String status;
+  final String? moderationStatus;
+  final bool isDeleted;
+  final List<Reaction> reactions;
+  final DateTime createdAt;
+  final DateTime? editedAt;
+
+  Message({
+    required this.id,
+    required this.chatId,
+    required this.senderId,
+    required this.content,
+    this.contentType = 'text',
+    this.mediaUrl,
+    this.mediaId,
+    this.replyToId,
+    this.status = 'sending',
+    this.moderationStatus,
+    this.isDeleted = false,
+    this.reactions = const [],
+    required this.createdAt,
+    this.editedAt,
+  });
+
+  factory Message.fromJson(Map<String, dynamic> json) {
+    return Message(
+      id: json['id'] as String,
+      chatId: json['chat_id'] as String,
+      senderId: json['sender_id'] as String,
+      content: json['content'] as String,
+      contentType: json['content_type'] as String? ?? 'text',
+      mediaUrl: json['media_url'] as String?,
+      mediaId: json['media_id'] as String?,
+      replyToId: json['reply_to_id'] as String?,
+      status: json['status'] as String? ?? 'sent',
+      moderationStatus: json['moderation_status'] as String?,
+      isDeleted: json['is_deleted'] as bool? ?? false,
+      reactions: (json['reactions'] as List<dynamic>?)
+              ?.map((e) => Reaction.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          [],
+      createdAt: DateTime.parse(json['created_at'] as String),
+      editedAt: json['edited_at'] != null
+          ? DateTime.parse(json['edited_at'] as String)
+          : null,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'chat_id': chatId,
+        'sender_id': senderId,
+        'content': content,
+        'content_type': contentType,
+        'media_url': mediaUrl,
+        'media_id': mediaId,
+        'reply_to_id': replyToId,
+        'status': status,
+        'moderation_status': moderationStatus,
+        'is_deleted': isDeleted,
+        'reactions': reactions.map((r) => r.toJson()).toList(),
+        'created_at': createdAt.toIso8601String(),
+        'edited_at': editedAt?.toIso8601String(),
+      };
+
+  Message copyWith({
+    String? id,
+    String? chatId,
+    String? senderId,
+    String? content,
+    String? contentType,
+    String? mediaUrl,
+    String? mediaId,
+    String? replyToId,
+    String? status,
+    String? moderationStatus,
+    bool? isDeleted,
+    List<Reaction>? reactions,
+    DateTime? createdAt,
+    DateTime? editedAt,
+  }) {
+    return Message(
+      id: id ?? this.id,
+      chatId: chatId ?? this.chatId,
+      senderId: senderId ?? this.senderId,
+      content: content ?? this.content,
+      contentType: contentType ?? this.contentType,
+      mediaUrl: mediaUrl ?? this.mediaUrl,
+      mediaId: mediaId ?? this.mediaId,
+      replyToId: replyToId ?? this.replyToId,
+      status: status ?? this.status,
+      moderationStatus: moderationStatus ?? this.moderationStatus,
+      isDeleted: isDeleted ?? this.isDeleted,
+      reactions: reactions ?? this.reactions,
+      createdAt: createdAt ?? this.createdAt,
+      editedAt: editedAt ?? this.editedAt,
+    );
+  }
+}
+
+class Reaction {
+  final String userId;
+  final String emoji;
+  final DateTime createdAt;
+
+  Reaction({
+    required this.userId,
+    required this.emoji,
+    required this.createdAt,
+  });
+
+  factory Reaction.fromJson(Map<String, dynamic> json) {
+    return Reaction(
+      userId: json['user_id'] as String,
+      emoji: json['emoji'] as String,
+      createdAt: DateTime.parse(json['created_at'] as String),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'user_id': userId,
+        'emoji': emoji,
+        'created_at': createdAt.toIso8601String(),
+      };
+}
+
+class PaginatedMessages {
+  final List<Message> messages;
+  final String? nextCursor;
+  final bool hasMore;
+
+  PaginatedMessages({
+    required this.messages,
+    this.nextCursor,
+    this.hasMore = false,
+  });
+
+  factory PaginatedMessages.fromJson(Map<String, dynamic> json) {
+    return PaginatedMessages(
+      messages: (json['messages'] as List<dynamic>)
+          .map((e) => Message.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      nextCursor: json['next_cursor'] as String?,
+      hasMore: json['has_more'] as bool? ?? false,
+    );
+  }
+}
