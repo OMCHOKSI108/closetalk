@@ -14,6 +14,7 @@ import 'services/api_config.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/onboarding/permissions_screen.dart';
+import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -56,10 +57,7 @@ class CloseTalkApp extends StatelessWidget {
         builder: (context, auth, _) {
           return MaterialApp(
             title: 'CloseTalk',
-            theme: ThemeData(
-              colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-              useMaterial3: true,
-            ),
+            theme: AppTheme.light,
             home: _buildHome(auth),
           );
         },
