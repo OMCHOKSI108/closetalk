@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -64,10 +65,33 @@ type googleTokenPayload struct {
 }
 
 // Cache Google's public keys (refreshed every hour)
+type githubTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	Scope       string `json:"scope"`
+}
+
+type githubUser struct {
+	ID        int    `json:"id"`
+	Login     string `json:"login"`
+	Email     string `json:"email"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatar_url"`
+}
+
+type githubEmail struct {
+	Email    string `json:"email"`
+	Primary  bool   `json:"primary"`
+	Verified bool   `json:"verified"`
+}
+
 var (
 	googleKeysCache     []googleKey
 	googleKeysCacheTime time.Time
 	googleClientID      string
+	githubClientID      string
+	githubClientSecret  string
+	appleClientID       string
 )
 
 func main() {
@@ -78,6 +102,9 @@ func main() {
 	auth.InitJWT()
 
 	googleClientID = os.Getenv("GOOGLE_CLIENT_ID")
+	githubClientID = os.Getenv("GITHUB_CLIENT_ID")
+	githubClientSecret = os.Getenv("GITHUB_CLIENT_SECRET")
+	appleClientID = os.Getenv("APPLE_CLIENT_ID")
 
 	// Connect databases
 	if err := database.ConnectNeon(); err != nil {
@@ -139,8 +166,9 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "auth-service"})
 	})
 
-	// Auth routes (no auth required)
+	// Auth routes (no auth required, IP rate limited)
 	r.Route("/auth", func(r chi.Router) {
+		r.Use(middleware.IPRateLimit)
 		r.Post("/register", handleRegister)
 		r.Post("/login", handleLogin)
 		r.Post("/oauth", handleOAuth)
@@ -153,6 +181,7 @@ func main() {
 	// Auth routes (JWT required)
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
 		r.Put("/auth/password", handleChangePassword)
 		r.Post("/auth/logout", handleLogout)
 	})
@@ -160,6 +189,7 @@ func main() {
 	// Device routes (JWT required)
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
 		r.Get("/devices", handleListDevices)
 		r.Post("/devices/link", handleLinkDevice)
 		r.Post("/devices/revoke", handleRevokeDevice)
@@ -168,6 +198,7 @@ func main() {
 	// Group routes (JWT required)
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
 		r.Get("/groups", handleListGroups)
 		r.Post("/groups", handleCreateGroup)
 		r.Get("/groups/{id}", handleGetGroup)
@@ -387,9 +418,9 @@ func handleOAuth(w http.ResponseWriter, r *http.Request) {
 	case "google":
 		handleGoogleOAuth(w, r, req.Code)
 	case "apple":
-		writeError(w, http.StatusBadRequest, &model.AppError{Code: "NOT_IMPLEMENTED", Message: "Apple OAuth not yet implemented"})
+		handleAppleOAuth(w, r, req.Code)
 	case "github":
-		writeError(w, http.StatusBadRequest, &model.AppError{Code: "NOT_IMPLEMENTED", Message: "GitHub OAuth not yet implemented"})
+		handleGitHubOAuth(w, r, req.Code)
 	default:
 		writeError(w, http.StatusBadRequest, &model.AppError{Code: "INVALID_PROVIDER", Message: "unsupported provider: " + req.Provider})
 	}
@@ -603,7 +634,363 @@ func verifyGoogleIDToken(idToken string) (*googleTokenPayload, error) {
 	return &payload, nil
 }
 
+func handleGitHubOAuth(w http.ResponseWriter, r *http.Request, code string) {
+	if githubClientID == "" || githubClientSecret == "" {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "CONFIG_ERROR", Message: "GitHub OAuth not configured"})
+		return
+	}
 
+	// Exchange authorization code for access token
+	tokenResp, err := http.PostForm("https://github.com/login/oauth/access_token",
+		url.Values{
+			"client_id":     {githubClientID},
+			"client_secret": {githubClientSecret},
+			"code":          {code},
+		},
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "OAUTH_FAILED", Message: "failed to exchange code"})
+		return
+	}
+	defer tokenResp.Body.Close()
+
+	body, err := io.ReadAll(tokenResp.Body)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "OAUTH_FAILED", Message: "failed to read token response"})
+		return
+	}
+
+	// GitHub returns form-encoded by default
+	values, err := url.ParseQuery(string(body))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "OAUTH_FAILED", Message: "failed to parse token response"})
+		return
+	}
+
+	accessToken := values.Get("access_token")
+	if accessToken == "" {
+		writeError(w, http.StatusUnauthorized, &model.AppError{Code: "OAUTH_FAILED", Message: "failed to get access token"})
+		return
+	}
+
+	// Fetch user info
+	req, _ := http.NewRequest("GET", "https://api.github.com/user", nil)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/json")
+
+	userResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "OAUTH_FAILED", Message: "failed to fetch user"})
+		return
+	}
+	defer userResp.Body.Close()
+
+	var ghUser githubUser
+	if err := json.NewDecoder(userResp.Body).Decode(&ghUser); err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "OAUTH_FAILED", Message: "failed to parse user"})
+		return
+	}
+
+	// GitHub doesn't always return email in /user — fetch emails if needed
+	email := ghUser.Email
+	if email == "" {
+		emailReq, _ := http.NewRequest("GET", "https://api.github.com/user/emails", nil)
+		emailReq.Header.Set("Authorization", "Bearer "+accessToken)
+		emailReq.Header.Set("Accept", "application/json")
+
+		emailResp, err := http.DefaultClient.Do(emailReq)
+		if err == nil {
+			defer emailResp.Body.Close()
+			var emails []githubEmail
+			if json.NewDecoder(emailResp.Body).Decode(&emails) == nil {
+				for _, e := range emails {
+					if e.Primary && e.Verified {
+						email = e.Email
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if email == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "OAUTH_FAILED", Message: "no verified email from GitHub"})
+		return
+	}
+
+	displayName := ghUser.Name
+	if displayName == "" {
+		displayName = ghUser.Login
+	}
+
+	ctx := context.Background()
+
+	// Find or create user
+	var userID string
+	err = database.Pool.QueryRow(ctx,
+		`SELECT id FROM users WHERE email = $1`, email,
+	).Scan(&userID)
+
+	if err != nil {
+		userID = uuid.New().String()
+		now := time.Now()
+		_, err = database.Pool.Exec(ctx,
+			`INSERT INTO users (id, email, display_name, avatar_url, oauth_provider, is_admin, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, 'github', false, $5, $5)`,
+			model.ParseUUIDOrNil(userID), email, displayName, ghUser.AvatarURL, now,
+		)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to create user"})
+			return
+		}
+		database.Pool.Exec(ctx,
+			`INSERT INTO user_settings (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+			model.ParseUUIDOrNil(userID),
+		)
+	}
+
+	parsedID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
+
+	accessTokenJWT, _ := auth.GenerateAccessToken(parsedID, false)
+	refreshToken, _ := auth.GenerateRefreshToken()
+	database.StoreSession(ctx, refreshToken, userID, "", 7*24*time.Hour)
+
+	var user model.User
+	err = database.Pool.QueryRow(ctx,
+		`SELECT id, email, display_name, avatar_url, bio, is_admin, created_at FROM users WHERE id = $1`,
+		userID,
+	).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.Bio, &user.IsAdmin, &user.CreatedAt)
+	if err != nil {
+		user = model.User{ID: parsedID, DisplayName: displayName, CreatedAt: time.Now()}
+	}
+
+	writeJSON(w, http.StatusOK, model.AuthResponse{
+		AccessToken:  accessTokenJWT,
+		RefreshToken: refreshToken,
+		ExpiresIn:    900,
+		User: model.UserResponse{
+			ID:          user.ID,
+			Email:       ptr(email),
+			DisplayName: user.DisplayName,
+			AvatarURL:   user.AvatarURL,
+			Bio:         user.Bio,
+			IsAdmin:     user.IsAdmin,
+			CreatedAt:   user.CreatedAt,
+		},
+	})
+}
+
+func handleAppleOAuth(w http.ResponseWriter, r *http.Request, idToken string) {
+	if appleClientID == "" {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "CONFIG_ERROR", Message: "Apple OAuth not configured"})
+		return
+	}
+
+	payload, err := verifyAppleIDToken(idToken)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, &model.AppError{Code: "OAUTH_FAILED", Message: "failed to verify Apple token: " + err.Error()})
+		return
+	}
+
+	email := payload.Email
+	if email == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "OAUTH_FAILED", Message: "no email from Apple (user may need to re-auth with email scope)"})
+		return
+	}
+
+	displayName := payload.Name
+	if displayName == "" {
+		displayName = strings.Split(email, "@")[0]
+	}
+
+	ctx := context.Background()
+
+	var userID string
+	err = database.Pool.QueryRow(ctx,
+		`SELECT id FROM users WHERE email = $1`, email,
+	).Scan(&userID)
+
+	if err != nil {
+		userID = uuid.New().String()
+		now := time.Now()
+		_, err = database.Pool.Exec(ctx,
+			`INSERT INTO users (id, email, display_name, oauth_provider, is_admin, created_at, updated_at)
+			 VALUES ($1, $2, $3, 'apple', false, $4, $4)`,
+			model.ParseUUIDOrNil(userID), email, displayName, now,
+		)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to create user"})
+			return
+		}
+		database.Pool.Exec(ctx,
+			`INSERT INTO user_settings (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+			model.ParseUUIDOrNil(userID),
+		)
+	}
+
+	parsedID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
+
+	accessTokenJWT, _ := auth.GenerateAccessToken(parsedID, false)
+	refreshToken, _ := auth.GenerateRefreshToken()
+	database.StoreSession(ctx, refreshToken, userID, "", 7*24*time.Hour)
+
+	var user model.User
+	err = database.Pool.QueryRow(ctx,
+		`SELECT id, email, display_name, avatar_url, bio, is_admin, created_at FROM users WHERE id = $1`,
+		userID,
+	).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.Bio, &user.IsAdmin, &user.CreatedAt)
+	if err != nil {
+		user = model.User{ID: parsedID, DisplayName: displayName, CreatedAt: time.Now()}
+	}
+
+	writeJSON(w, http.StatusOK, model.AuthResponse{
+		AccessToken:  accessTokenJWT,
+		RefreshToken: refreshToken,
+		ExpiresIn:    900,
+		User: model.UserResponse{
+			ID:          user.ID,
+			Email:       ptr(email),
+			DisplayName: user.DisplayName,
+			AvatarURL:   user.AvatarURL,
+			Bio:         user.Bio,
+			IsAdmin:     user.IsAdmin,
+			CreatedAt:   user.CreatedAt,
+		},
+	})
+}
+
+type appleTokenPayload struct {
+	Iss           string `json:"iss"`
+	Sub           string `json:"sub"`
+	Aud           string `json:"aud"`
+	Iat           int64  `json:"iat"`
+	Exp           int64  `json:"exp"`
+	Email         string `json:"email"`
+	EmailVerified string `json:"email_verified"`
+	Name          string `json:"name"`
+}
+
+type appleKeysResponse struct {
+	Keys []appleKey `json:"keys"`
+}
+
+type appleKey struct {
+	Kty string `json:"kty"`
+	Kid string `json:"kid"`
+	Use string `json:"use"`
+	Alg string `json:"alg"`
+	N   string `json:"n"`
+	E   string `json:"e"`
+}
+
+var (
+	appleKeysCache     []appleKey
+	appleKeysCacheTime time.Time
+)
+
+func verifyAppleIDToken(idToken string) (*appleTokenPayload, error) {
+	if appleKeysCache == nil || time.Since(appleKeysCacheTime) > time.Hour {
+		resp, err := http.Get("https://appleid.apple.com/auth/keys")
+		if err != nil {
+			return nil, fmt.Errorf("fetch apple keys: %w", err)
+		}
+		defer resp.Body.Close()
+
+		var keysResp appleKeysResponse
+		if err := json.NewDecoder(resp.Body).Decode(&keysResp); err != nil {
+			return nil, fmt.Errorf("parse apple keys: %w", err)
+		}
+		appleKeysCache = keysResp.Keys
+		appleKeysCacheTime = time.Now()
+	}
+
+	parts := strings.Split(idToken, ".")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("invalid token format")
+	}
+
+	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, fmt.Errorf("decode header: %w", err)
+	}
+
+	var header struct {
+		Kid string `json:"kid"`
+		Alg string `json:"alg"`
+	}
+	if err := json.Unmarshal(headerJSON, &header); err != nil {
+		return nil, fmt.Errorf("parse header: %w", err)
+	}
+
+	var matchedKey *appleKey
+	for i := range appleKeysCache {
+		if appleKeysCache[i].Kid == header.Kid {
+			matchedKey = &appleKeysCache[i]
+			break
+		}
+	}
+
+	if matchedKey == nil {
+		return nil, fmt.Errorf("key not found for kid: %s", header.Kid)
+	}
+
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return nil, fmt.Errorf("decode signature: %w", err)
+	}
+
+	nBytes, err := base64.RawURLEncoding.DecodeString(matchedKey.N)
+	if err != nil {
+		return nil, fmt.Errorf("decode n: %w", err)
+	}
+	eBytes, err := base64.RawURLEncoding.DecodeString(matchedKey.E)
+	if err != nil {
+		return nil, fmt.Errorf("decode e: %w", err)
+	}
+
+	pubKey := &rsa.PublicKey{
+		N: new(big.Int).SetBytes(nBytes),
+		E: int(new(big.Int).SetBytes(eBytes).Int64()),
+	}
+
+	message := parts[0] + "." + parts[1]
+	hash := sha256.Sum256([]byte(message))
+	if err := rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, hash[:], signature); err != nil {
+		return nil, fmt.Errorf("invalid signature: %w", err)
+	}
+
+	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("decode payload: %w", err)
+	}
+
+	var payload appleTokenPayload
+	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
+		return nil, fmt.Errorf("parse payload: %w", err)
+	}
+
+	if payload.Iss != "https://appleid.apple.com" {
+		return nil, fmt.Errorf("invalid issuer: %s", payload.Iss)
+	}
+
+	if payload.Aud != appleClientID {
+		return nil, fmt.Errorf("invalid audience: %s", payload.Aud)
+	}
+
+	if payload.Exp > 0 && time.Now().Unix() > payload.Exp {
+		return nil, fmt.Errorf("token expired at %d", payload.Exp)
+	}
+
+	return &payload, nil
+}
 
 func handleRefresh(w http.ResponseWriter, r *http.Request) {
 	var req model.RefreshRequest

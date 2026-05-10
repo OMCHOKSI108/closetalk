@@ -157,10 +157,13 @@ func (s *ScyllaMessageStore) RemoveBookmark(ctx context.Context, userID string, 
 	).WithContext(ctx).Exec()
 }
 
-func (s *ScyllaMessageStore) ListBookmarks(ctx context.Context, userID string) ([]model.BookmarkResponse, error) {
+func (s *ScyllaMessageStore) ListBookmarks(ctx context.Context, userID string, cursor time.Time, limit int) ([]model.BookmarkResponse, bool, error) {
 	iter := Scylla.Query(
-		`SELECT message_id, chat_id, content_preview, created_at FROM closetalk.bookmarks WHERE user_id = ?`,
-		userID,
+		`SELECT message_id, chat_id, content_preview, created_at FROM closetalk.bookmarks
+		 WHERE user_id = ? AND created_at < ?
+		 ORDER BY created_at DESC
+		 LIMIT ?`,
+		userID, cursor, limit,
 	).WithContext(ctx).Iter()
 
 	var result []model.BookmarkResponse
@@ -175,7 +178,12 @@ func (s *ScyllaMessageStore) ListBookmarks(ctx context.Context, userID string) (
 			CreatedAt: createdAt,
 		})
 	}
-	return result, iter.Close()
+	if err := iter.Close(); err != nil {
+		return nil, false, err
+	}
+
+	hasMore := len(result) == limit
+	return result, hasMore, nil
 }
 
 // Ensure compile-time interface compliance

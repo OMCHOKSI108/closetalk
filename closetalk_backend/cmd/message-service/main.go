@@ -86,6 +86,7 @@ func main() {
 	// Message REST API (JWT required)
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
 
 		r.Post("/messages", handleSendMessage)
 		r.Get("/messages/{chatId}", handleGetMessages)
@@ -102,6 +103,7 @@ func main() {
 	// Sync & device routes (JWT required)
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
 
 		r.Get("/sync/messages", handleSyncMessages)
 		r.Get("/sync/status", handleSyncStatus)
@@ -633,7 +635,22 @@ func handleRemoveBookmark(w http.ResponseWriter, r *http.Request) {
 
 func handleListBookmarks(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
-	result, err := database.GlobalStore.ListBookmarks(context.Background(), userID)
+
+	cursor := time.Now()
+	if c := r.URL.Query().Get("cursor"); c != "" {
+		if t, err := time.Parse(time.RFC3339, c); err == nil {
+			cursor = t
+		}
+	}
+
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+
+	result, hasMore, err := database.GlobalStore.ListBookmarks(context.Background(), userID, cursor, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to list bookmarks")
 		return
@@ -641,7 +658,17 @@ func handleListBookmarks(w http.ResponseWriter, r *http.Request) {
 	if result == nil {
 		result = []model.BookmarkResponse{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"bookmarks": result})
+
+	var nextCursor string
+	if len(result) > 0 {
+		nextCursor = result[len(result)-1].CreatedAt.Format(time.RFC3339)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"bookmarks":   result,
+		"has_more":    hasMore,
+		"next_cursor": nextCursor,
+	})
 }
 
 func handleSyncMessages(w http.ResponseWriter, r *http.Request) {

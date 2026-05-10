@@ -259,7 +259,7 @@ class _GroupSettingsSheetState extends State<_GroupSettingsSheet> {
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
-            value: _messageRetention,
+            initialValue: _messageRetention,
             decoration: const InputDecoration(labelText: 'Message retention'),
             items: const [
               DropdownMenuItem(value: 'off', child: Text('Off')),
@@ -271,7 +271,7 @@ class _GroupSettingsSheetState extends State<_GroupSettingsSheet> {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _disappearingMsg,
+            initialValue: _disappearingMsg,
             decoration:
                 const InputDecoration(labelText: 'Disappearing messages'),
             items: const [

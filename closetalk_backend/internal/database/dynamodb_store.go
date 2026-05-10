@@ -537,18 +537,26 @@ func (s *DynamoDBStore) RemoveBookmark(ctx context.Context, userID string, messa
 	return err
 }
 
-func (s *DynamoDBStore) ListBookmarks(ctx context.Context, userID string) ([]model.BookmarkResponse, error) {
-	result, err := Dynamo.Query(ctx, &dynamodb.QueryInput{
+func (s *DynamoDBStore) ListBookmarks(ctx context.Context, userID string, cursor time.Time, limit int) ([]model.BookmarkResponse, bool, error) {
+	cursorKey := sortKeyFromTime(cursor, uuid.Nil)
+
+	queryInput := &dynamodb.QueryInput{
 		TableName:              aws.String("closetalk-bookmarks"),
-		KeyConditionExpression: aws.String("user_id = :uid"),
+		KeyConditionExpression: aws.String("user_id = :uid AND sort_key < :cursor"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":uid": &types.AttributeValueMemberS{Value: userID},
+			":uid":    &types.AttributeValueMemberS{Value: userID},
+			":cursor": &types.AttributeValueMemberS{Value: cursorKey},
 		},
 		ScanIndexForward: aws.Bool(false),
-	})
-	if err != nil {
-		return nil, err
+		Limit:            aws.Int32(int32(limit)),
 	}
+
+	result, err := Dynamo.Query(ctx, queryInput)
+	if err != nil {
+		return nil, false, err
+	}
+
+	hasMore := result.LastEvaluatedKey != nil
 
 	bookmarks := make([]model.BookmarkResponse, 0, len(result.Items))
 	for _, item := range result.Items {
@@ -566,7 +574,7 @@ func (s *DynamoDBStore) ListBookmarks(ctx context.Context, userID string) ([]mod
 		})
 	}
 
-	return bookmarks, nil
+	return bookmarks, hasMore, nil
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

@@ -14,6 +14,14 @@ func ParseUUID(s string) (uuid.UUID, error) {
 	return id, nil
 }
 
+func ParseUUIDOrNil(s string) uuid.UUID {
+	id, err := uuid.Parse(s)
+	if err != nil {
+		return uuid.Nil
+	}
+	return id
+}
+
 type User struct {
 	ID           uuid.UUID  `json:"id"`
 	Email        *string    `json:"email,omitempty"`

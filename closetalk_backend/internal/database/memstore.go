@@ -162,25 +162,37 @@ func (s *MemStore) RemoveBookmark(ctx context.Context, userID string, messageID 
 	return nil
 }
 
-func (s *MemStore) ListBookmarks(ctx context.Context, userID string) ([]model.BookmarkResponse, error) {
+func (s *MemStore) ListBookmarks(ctx context.Context, userID string, cursor time.Time, limit int) ([]model.BookmarkResponse, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	entries, ok := s.bookmarks[userID]
 	if !ok {
-		return []model.BookmarkResponse{}, nil
+		return []model.BookmarkResponse{}, false, nil
 	}
 
-	result := make([]model.BookmarkResponse, 0, len(entries))
+	var result []model.BookmarkResponse
 	for _, entry := range entries {
-		result = append(result, model.BookmarkResponse{
-			MessageID: entry.MessageID.String(),
-			ChatID:    entry.ChatID,
-			Preview:   entry.Preview,
-			CreatedAt: entry.CreatedAt,
-		})
+		if entry.CreatedAt.Before(cursor) {
+			result = append(result, model.BookmarkResponse{
+				MessageID: entry.MessageID.String(),
+				ChatID:    entry.ChatID,
+				Preview:   entry.Preview,
+				CreatedAt: entry.CreatedAt,
+			})
+		}
 	}
-	return result, nil
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].CreatedAt.After(result[j].CreatedAt)
+	})
+
+	hasMore := len(result) > limit
+	if len(result) > limit {
+		result = result[:limit]
+	}
+
+	return result, hasMore, nil
 }
 
 var GlobalStore MessageStore = NewMemStore()
