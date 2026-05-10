@@ -52,6 +52,24 @@ type RegisterRequest struct {
 	Username    string `json:"username"`
 }
 
+type RegisterInitRequest struct {
+	Email       string `json:"email"`
+	Password    string `json:"password"`
+	DisplayName string `json:"display_name"`
+	Username    string `json:"username"`
+}
+
+type RegisterVerifyRequest struct {
+	Email string `json:"email"`
+	OTP   string `json:"otp"`
+}
+
+type RegisterInitResponse struct {
+	Message  string `json:"message"`
+	Email    string `json:"email"`
+	Cooldown int    `json:"cooldown"` // seconds until next OTP
+}
+
 type LoginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`

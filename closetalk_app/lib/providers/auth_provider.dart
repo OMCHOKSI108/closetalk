@@ -50,6 +50,109 @@ class AuthProvider extends ChangeNotifier {
     if (_user != null) prefs.setString('user', jsonEncode(_user!.toJson()));
   }
 
+  String? _pendingEmail;
+
+  String? get pendingEmail => _pendingEmail;
+
+  /// Step 1: submit registration form, receive OTP via email
+  Future<Map<String, dynamic>> registerInit({
+    required String email,
+    required String password,
+    required String displayName,
+    required String username,
+  }) async {
+    _status = AuthStatus.loading;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final client = HttpClient();
+      try {
+        final req = await client.postUrl(
+            Uri.parse('${ApiConfig.authBaseUrl}/auth/register/init'));
+        req.headers.set('Content-Type', 'application/json');
+        req.write(jsonEncode({
+          'email': email,
+          'password': password,
+          'display_name': displayName,
+          'username': username,
+        }));
+        final resp = await req.close();
+        final body = await resp.transform(utf8.decoder).join();
+
+        if (resp.statusCode == 200) {
+          _pendingEmail = email;
+          _status = AuthStatus.unauthenticated;
+          notifyListeners();
+          return jsonDecode(body) as Map<String, dynamic>;
+        } else {
+          final err = jsonDecode(body) as Map<String, dynamic>;
+          _error = err['error'] as String? ?? 'Failed to send verification code';
+          _status = AuthStatus.unauthenticated;
+          notifyListeners();
+          return err;
+        }
+      } finally {
+        client.close();
+      }
+    } catch (e) {
+      _error = 'Network error: $e';
+      _status = AuthStatus.unauthenticated;
+      notifyListeners();
+      return {'error': _error};
+    }
+  }
+
+  /// Step 2: verify OTP to complete registration
+  Future<Map<String, dynamic>> registerVerify({
+    required String email,
+    required String otp,
+  }) async {
+    _status = AuthStatus.loading;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final client = HttpClient();
+      try {
+        final req = await client.postUrl(
+            Uri.parse('${ApiConfig.authBaseUrl}/auth/register/verify'));
+        req.headers.set('Content-Type', 'application/json');
+        req.write(jsonEncode({'email': email, 'otp': otp}));
+        final resp = await req.close();
+        final body = await resp.transform(utf8.decoder).join();
+
+        if (resp.statusCode == 201) {
+          final data = AuthResponse.fromJson(
+              jsonDecode(body) as Map<String, dynamic>);
+          _token = data.accessToken;
+          _refreshToken = data.refreshToken;
+          _user = data.user;
+          _recoveryCodes = data.recoveryCodes;
+          _pendingEmail = null;
+          ApiConfig.token = _token;
+          await _saveSession();
+          _status = AuthStatus.authenticated;
+          notifyListeners();
+          return {'success': true};
+        } else {
+          final err = jsonDecode(body) as Map<String, dynamic>;
+          _error = err['error'] as String? ?? 'Verification failed';
+          _status = AuthStatus.unauthenticated;
+          notifyListeners();
+          return err;
+        }
+      } finally {
+        client.close();
+      }
+    } catch (e) {
+      _error = 'Network error: $e';
+      _status = AuthStatus.unauthenticated;
+      notifyListeners();
+      return {'error': _error};
+    }
+  }
+
   Future<void> register({
     required String email,
     required String password,

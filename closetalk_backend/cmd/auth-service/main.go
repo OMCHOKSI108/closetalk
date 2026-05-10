@@ -11,8 +11,10 @@ import (
 	"io"
 	"log"
 	"math/big"
+	"math/rand"
 	"net"
 	"net/http"
+	"net/smtp"
 	"net/url"
 	"os"
 	"os/signal"
@@ -170,6 +172,8 @@ func main() {
 	// Auth routes (no auth required, IP rate limited)
 	r.Route("/auth", func(r chi.Router) {
 		r.Use(middleware.IPRateLimit)
+		r.Post("/register/init", handleRegisterInit)
+		r.Post("/register/verify", handleRegisterVerify)
 		r.Post("/register", handleRegister)
 		r.Post("/login", handleLogin)
 		r.Post("/oauth", handleOAuth)
@@ -268,6 +272,220 @@ func writeError(w http.ResponseWriter, status int, err *model.AppError) {
 		Error: err.Message,
 		Code:  err.Code,
 	})
+}
+
+func generateOTP() string {
+	return fmt.Sprintf("%06d", rand.Intn(1000000))
+}
+
+func handleRegisterInit(w http.ResponseWriter, r *http.Request) {
+	var req model.RegisterInitRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, model.ErrInvalidRequest)
+		return
+	}
+
+	if req.Email == "" || req.Password == "" || req.DisplayName == "" || req.Username == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "email, password, display_name, and username are required"})
+		return
+	}
+
+	if len(req.Password) < 8 {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "WEAK_PASSWORD", Message: "password must be at least 8 characters"})
+		return
+	}
+
+	if err := validateUsername(req.Username); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	ctx := context.Background()
+
+	// Check existing user
+	var exists bool
+	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)", req.Email).Scan(&exists)
+	if exists {
+		writeError(w, http.StatusConflict, model.ErrEmailTaken)
+		return
+	}
+	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)", req.Username).Scan(&exists)
+	if exists {
+		writeError(w, http.StatusConflict, &model.AppError{Code: "USERNAME_TAKEN", Message: "username is already taken"})
+		return
+	}
+
+	// Check cooldown (prevent OTP spam)
+	cooldownKey := "otp_cooldown:" + req.Email
+	if cooldown, err := database.Valkey.Get(ctx, cooldownKey).Int(); err == nil {
+		remaining := 60 - int(time.Now().Unix()) + cooldown
+		if remaining > 0 {
+			writeJSON(w, http.StatusTooManyRequests, model.RegisterInitResponse{
+				Message:  "please wait before requesting a new OTP",
+				Email:    req.Email,
+				Cooldown: remaining,
+			})
+			return
+		}
+	}
+
+	// Generate OTP
+	otp := generateOTP()
+	otpKey := "otp_register:" + req.Email
+
+	// Store pending registration data in Valkey (10 min TTL)
+	pendingData, _ := json.Marshal(map[string]string{
+		"email":        req.Email,
+		"password":     req.Password,
+		"display_name": req.DisplayName,
+		"username":     req.Username,
+		"otp":          otp,
+	})
+	if err := database.Valkey.Set(ctx, otpKey, pendingData, 10*time.Minute).Err(); err != nil {
+		log.Printf("[register] valkey set error: %v", err)
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "failed to initiate registration"})
+		return
+	}
+
+	// Set cooldown (60s)
+	database.Valkey.Set(ctx, cooldownKey, time.Now().Unix(), 60*time.Second)
+
+	// Send OTP email
+	go func() {
+		subject := "Your CloseTalk verification code"
+		body := fmt.Sprintf(`Your CloseTalk verification code is: %s
+
+This code expires in 10 minutes.
+
+If you did not request this, please ignore this email.`, otp)
+		if err := sendEmail(context.Background(), req.Email, subject, body); err != nil {
+			log.Printf("[register] ses error: %v", err)
+		}
+	}()
+
+	log.Printf("[register] OTP for %s: %s", req.Email, otp)
+
+	writeJSON(w, http.StatusOK, model.RegisterInitResponse{
+		Message:  "verification code sent to email",
+		Email:    req.Email,
+		Cooldown: 60,
+	})
+}
+
+func handleRegisterVerify(w http.ResponseWriter, r *http.Request) {
+	var req model.RegisterVerifyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, model.ErrInvalidRequest)
+		return
+	}
+
+	if req.Email == "" || req.OTP == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "email and otp are required"})
+		return
+	}
+
+	ctx := context.Background()
+	otpKey := "otp_register:" + req.Email
+
+	// Get pending data from Valkey
+	pendingJSON, err := database.Valkey.Get(ctx, otpKey).Bytes()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "OTP_EXPIRED", Message: "verification code expired or invalid"})
+		return
+	}
+
+	var pending struct {
+		Email       string `json:"email"`
+		Password    string `json:"password"`
+		DisplayName string `json:"display_name"`
+		Username    string `json:"username"`
+		OTP         string `json:"otp"`
+	}
+	json.Unmarshal(pendingJSON, &pending)
+
+	if pending.OTP != req.OTP {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "INVALID_OTP", Message: "invalid verification code"})
+		return
+	}
+
+	// Double-check user doesn't exist
+	var exists bool
+	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)", req.Email).Scan(&exists)
+	if exists {
+		database.Valkey.Del(ctx, otpKey)
+		writeError(w, http.StatusConflict, model.ErrEmailTaken)
+		return
+	}
+
+	// Hash password & create user
+	hash, err := auth.HashPassword(pending.Password)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "failed to process password"})
+		return
+	}
+
+	var userID string
+	err = database.Pool.QueryRow(ctx,
+		`INSERT INTO users (email, display_name, username, password_hash)
+		 VALUES ($1, $2, $3, $4)
+		 RETURNING id`,
+		pending.Email, pending.DisplayName, pending.Username, hash,
+	).Scan(&userID)
+	if err != nil {
+		log.Printf("[register] insert error: %v", err)
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "failed to create user"})
+		return
+	}
+
+	// Insert default settings
+	_, _ = database.Pool.Exec(ctx,
+		`INSERT INTO user_settings (user_id) VALUES ($1) ON CONFLICT DO NOTHING`, userID)
+
+	// Generate recovery codes
+	codes, err := auth.GenerateRecoveryCodes(10)
+	if err != nil {
+		log.Printf("[register] recovery code error: %v", err)
+	} else {
+		for _, code := range codes {
+			hashed := auth.HashRecoveryCode(code)
+			database.Pool.Exec(ctx,
+				`INSERT INTO recovery_codes (user_id, code_hash) VALUES ($1, $2)`, userID, hashed)
+		}
+	}
+
+	// Clean up OTP data
+	database.Valkey.Del(ctx, otpKey)
+	database.Valkey.Del(ctx, "otp_cooldown:"+req.Email)
+
+	parsedID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
+
+	// Generate tokens
+	accessToken, _ := auth.GenerateAccessToken(parsedID, false)
+	refreshToken, _ := auth.GenerateRefreshToken()
+
+	database.StoreSession(ctx, refreshToken, userID, "", 7*24*time.Hour)
+
+	writeJSON(w, http.StatusCreated, model.AuthResponse{
+		AccessToken:   accessToken,
+		RefreshToken:  refreshToken,
+		ExpiresIn:     900,
+		User:          model.UserResponse{ID: parsedID, Email: &pending.Email, Username: pending.Username, DisplayName: pending.DisplayName},
+		RecoveryCodes: codes,
+	})
+}
+
+func validateUsername(username string) *model.AppError {
+	if len(username) < 3 || len(username) > 30 {
+		return &model.AppError{Code: "INVALID_USERNAME", Message: "username must be between 3 and 30 characters"}
+	}
+	if !regexp.MustCompile(`^[a-zA-Z0-9_]+$`).MatchString(username) {
+		return &model.AppError{Code: "INVALID_USERNAME", Message: "username can only contain letters, numbers, and underscores"}
+	}
+	return nil
 }
 
 func handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -1166,7 +1384,7 @@ func handleRecoverEmail(w http.ResponseWriter, r *http.Request) {
 		recoveryLink := fmt.Sprintf("https://d34etjxuah5cvp.cloudfront.net/auth/recover?token=%s", recoveryToken)
 
 		// Try to send email via SES
-		sesErr := sendSESEmail(ctx, req.Email, "CloseTalk Password Recovery",
+		sesErr := sendEmail(ctx, req.Email, "CloseTalk Password Recovery",
 			fmt.Sprintf("Hi %s,\n\nClick the link below to reset your password:\n%s\n\nThis link expires in 15 minutes.\n\nIf you didn't request this, ignore this email.", displayName, recoveryLink),
 		)
 		if sesErr != nil {
@@ -1252,7 +1470,32 @@ func getSESClient() *sesv2.Client {
 	return sesClient
 }
 
-func sendSESEmail(ctx context.Context, to, subject, body string) error {
+func sendEmail(ctx context.Context, to, subject, body string) error {
+	// Try SMTP first (good for local dev with Gmail/SendGrid)
+	if host := os.Getenv("SMTP_HOST"); host != "" {
+		port := os.Getenv("SMTP_PORT")
+		if port == "" {
+			port = "587"
+		}
+		user := os.Getenv("SMTP_USER")
+		pass := os.Getenv("SMTP_PASS")
+		from := os.Getenv("SMTP_FROM")
+		if from == "" {
+			from = user
+		}
+		if user != "" && pass != "" {
+			msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\n\r\n%s", from, to, subject, body)
+			addr := fmt.Sprintf("%s:%s", host, port)
+			auth := smtp.PlainAuth("", user, pass, host)
+			if err := smtp.SendMail(addr, auth, from, []string{to}, []byte(msg)); err != nil {
+				log.Printf("[email] SMTP error: %v", err)
+				return err
+			}
+			return nil
+		}
+	}
+
+	// Fall back to SES
 	from := os.Getenv("SES_FROM_EMAIL")
 	if from == "" {
 		from = "noreply@closetalk.app"
@@ -1260,7 +1503,7 @@ func sendSESEmail(ctx context.Context, to, subject, body string) error {
 
 	client := getSESClient()
 	if client == nil {
-		return fmt.Errorf("SES client not initialized")
+		return fmt.Errorf("no email provider configured (set SMTP_HOST+SMTP_USER+SMTP_PASS or configure SES)")
 	}
 
 	_, err := client.SendEmail(ctx, &sesv2.SendEmailInput{

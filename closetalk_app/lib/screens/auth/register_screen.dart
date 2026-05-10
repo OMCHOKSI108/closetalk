@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
-import '../home_screen.dart';
+import 'otp_verify_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -56,49 +56,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
 
     final auth = context.read<AuthProvider>();
-    await auth.register(
+    await auth.registerInit(
       email: _emailController.text.trim(),
       password: _passwordController.text,
       displayName: _nameController.text.trim(),
       username: username,
     );
 
-    if (mounted && auth.status == AuthStatus.authenticated) {
-      final codes = auth.recoveryCodes;
-      if (codes != null && codes.isNotEmpty && mounted) {
-        await showDialog(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Recovery Codes'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Save these codes. Each can be used once.'),
-                const SizedBox(height: 12),
-                ...codes.map((c) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Text(c,
-                          style: const TextStyle(
-                              fontFamily: 'monospace', fontSize: 14)),
-                    )),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('I Saved Them'),
-              ),
-            ],
-          ),
-        );
-      }
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
-        );
-      }
+    if (mounted && auth.error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(auth.error!)),
+      );
+      return;
+    }
+
+    if (mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => OTPVerifyScreen(email: _emailController.text.trim()),
+        ),
+      );
     }
   }
 
