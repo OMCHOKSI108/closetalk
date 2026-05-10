@@ -17,8 +17,11 @@ class _BookmarkListScreenState extends State<BookmarkListScreen> {
   @override
   void initState() {
     super.initState();
-    final bp = context.read<BookmarkProvider>();
-    if (bp.bookmarks.isEmpty) bp.fetchBookmarks(refresh: true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final bp = context.read<BookmarkProvider>();
+      if (bp.bookmarks.isEmpty) bp.fetchBookmarks(refresh: true);
+    });
 
     _scrollController.addListener(() {
       if (_scrollController.position.pixels >=

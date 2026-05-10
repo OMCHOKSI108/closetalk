@@ -1,6 +1,10 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/api_config.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
@@ -91,6 +95,76 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
+  Future<void> _pickAndUploadAvatar() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 512,
+      maxHeight: 512,
+    );
+    if (picked == null) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final client = HttpClient();
+      try {
+        final req = await client.putUrl(
+          Uri.parse('${ApiConfig.authBaseUrl}/users/avatar'),
+        );
+        req.headers.set('Authorization', 'Bearer ${ApiConfig.token}');
+
+        final bytes = await picked.readAsBytes();
+        final boundary = 'boundary${DateTime.now().millisecondsSinceEpoch}';
+        req.headers.set(
+          'Content-Type',
+          'multipart/form-data; boundary=$boundary',
+        );
+
+        final body = utf8.encode(
+              '--$boundary\r\n'
+              'Content-Disposition: form-data; name="avatar"; filename="avatar.jpg"\r\n'
+              'Content-Type: image/jpeg\r\n\r\n',
+            ) +
+            bytes +
+            utf8.encode('\r\n--$boundary--\r\n');
+
+        req.contentLength = body.length;
+        req.add(body);
+        final resp = await req.close();
+        final responseBody = await resp.transform(utf8.decoder).join();
+
+        if (resp.statusCode == 200) {
+          final data = jsonDecode(responseBody) as Map<String, dynamic>;
+          final avatarUrl = data['avatar_url'] as String;
+          final auth = context.read<AuthProvider>();
+          await auth.updateProfile(avatarUrl: avatarUrl);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Avatar updated')),
+            );
+          }
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Failed to upload avatar')),
+            );
+          }
+        }
+      } finally {
+        client.close();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+
+    setState(() => _isLoading = false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
@@ -102,14 +176,37 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            CircleAvatar(
-              radius: 48,
-              backgroundImage: user?.avatarUrl.isNotEmpty == true
-                  ? NetworkImage(user!.avatarUrl)
-                  : null,
-              child: user?.avatarUrl.isNotEmpty != true
-                  ? Icon(Icons.person, size: 48, color: Colors.grey[400])
-                  : null,
+            Stack(
+              children: [
+                CircleAvatar(
+                  radius: 48,
+                  backgroundImage: user?.avatarUrl.isNotEmpty == true
+                      ? NetworkImage(user!.avatarUrl)
+                      : null,
+                  child: user?.avatarUrl.isNotEmpty != true
+                      ? Icon(Icons.person, size: 48, color: Colors.grey[400])
+                      : null,
+                ),
+                Positioned(
+                  right: 0,
+                  bottom: 0,
+                  child: GestureDetector(
+                    onTap: _pickAndUploadAvatar,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primary,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.camera_alt,
+                        size: 20,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 24),
             TextField(

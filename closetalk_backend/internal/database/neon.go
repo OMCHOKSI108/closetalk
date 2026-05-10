@@ -215,6 +215,30 @@ func RunMigrations() error {
 			language                    TEXT DEFAULT 'en',
 			updated_at                  TIMESTAMPTZ DEFAULT now()
 		)`,
+
+		`CREATE TABLE IF NOT EXISTS contacts (
+			user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			contact_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			status          TEXT NOT NULL DEFAULT 'pending'
+			                CHECK (status IN ('pending','sent','accepted','blocked')),
+			conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+			created_at      TIMESTAMPTZ DEFAULT now(),
+			updated_at      TIMESTAMPTZ DEFAULT now(),
+			PRIMARY KEY (user_id, contact_id)
+		)`,
+
+		`CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_contacts_contact ON contacts(contact_id)`,
+
+		`CREATE TABLE IF NOT EXISTS reports (
+			id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			reporter_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			reported_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			reason          TEXT NOT NULL,
+			created_at      TIMESTAMPTZ DEFAULT now()
+		)`,
+
+		`CREATE INDEX IF NOT EXISTS idx_reports_reported ON reports(reported_user_id)`,
 	}
 
 	for _, m := range migrations {

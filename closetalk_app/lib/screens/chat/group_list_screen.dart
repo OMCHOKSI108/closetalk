@@ -18,7 +18,9 @@ class _GroupListScreenState extends State<GroupListScreen> {
   @override
   void initState() {
     super.initState();
-    context.read<GroupProvider>().fetchGroups();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<GroupProvider>().fetchGroups();
+    });
   }
 
   Future<void> _refresh() async {

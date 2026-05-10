@@ -179,6 +179,11 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		send:     make(chan []byte, 256),
 	}
 
+	// Register Valkey session for presence tracking
+	if database.Valkey != nil {
+		database.StoreUserSession(context.Background(), claims.UserID, deviceID, 5*time.Minute)
+	}
+
 	hub.register(client)
 
 	go client.writePump()

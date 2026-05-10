@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/auth_service.dart';
+import '../../widgets/user_avatar.dart';
+import '../chat/user_profile_screen.dart';
 import 'device_management_screen.dart';
 import 'bookmark_list_screen.dart';
 import 'edit_profile_screen.dart';
@@ -21,52 +23,61 @@ class SettingsScreen extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       children: [
         Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 32,
-                  backgroundImage: user?.avatarUrl.isNotEmpty == true
-                      ? NetworkImage(user!.avatarUrl)
-                      : null,
-                  child: user?.avatarUrl.isNotEmpty != true
-                      ? Text(
-                          user?.displayName.isNotEmpty == true
-                              ? user!.displayName[0].toUpperCase()
-                              : '?',
-                          style: const TextStyle(fontSize: 24),
-                        )
-                      : null,
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        user?.displayName ?? 'User',
-                        style: const TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                      if (user?.username.isNotEmpty == true)
-                        Text('@${user!.username}',
-                            style: TextStyle(color: Colors.grey[500])),
-                      if (user?.email != null)
-                        Text(user!.email!,
-                            style: TextStyle(color: Colors.grey[600])),
-                    ],
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () {
+              if (user != null) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => UserProfileScreen(
+                      userId: user.id,
+                      username: user.username,
+                      displayName: user.displayName,
+                      avatarUrl: user.avatarUrl,
+                    ),
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.edit),
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const EditProfileScreen()),
+                );
+              }
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  UserAvatar(
+                    imageUrl: user?.avatarUrl,
+                    name: user?.displayName ?? '?',
+                    radius: 32,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          user?.displayName ?? 'User',
+                          style: const TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        if (user?.username.isNotEmpty == true)
+                          Text('@${user!.username}',
+                              style: TextStyle(color: Colors.grey[500])),
+                        if (user?.email != null)
+                          Text(user!.email!,
+                              style: TextStyle(color: Colors.grey[600])),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.edit),
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const EditProfileScreen()),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

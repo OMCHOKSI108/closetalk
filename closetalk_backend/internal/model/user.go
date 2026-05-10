@@ -155,3 +155,78 @@ type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password"`
 	NewPassword string `json:"new_password"`
 }
+
+// ─── Contacts / Friends ────────────────────────────────────────────────────
+
+type ContactStatus string
+
+const (
+	ContactPending  ContactStatus = "pending"
+	ContactSent     ContactStatus = "sent"
+	ContactAccepted ContactStatus = "accepted"
+	ContactBlocked  ContactStatus = "blocked"
+)
+
+type ContactRequest struct {
+	ContactID string `json:"contact_id"`
+	Action    string `json:"action"` // send | accept | reject | remove
+}
+
+type ContactResponse struct {
+	ID             string        `json:"id"`
+	ContactID      string        `json:"contact_id"`
+	Username       string        `json:"username"`
+	DisplayName    string        `json:"display_name"`
+	AvatarURL      string        `json:"avatar_url,omitempty"`
+	Bio            string        `json:"bio"`
+	Status         ContactStatus `json:"status"`
+	IsOnline       bool          `json:"is_online"`
+	LastSeen       *time.Time    `json:"last_seen,omitempty"`
+	ConversationID string        `json:"conversation_id,omitempty"`
+	CreatedAt      time.Time     `json:"created_at"`
+}
+
+type ContactListResponse struct {
+	Contacts []ContactResponse `json:"contacts"`
+}
+
+// ─── Blocks / Reports ─────────────────────────────────────────────────────
+
+type BlockRequest struct {
+	BlockedUserID string `json:"blocked_user_id"`
+}
+
+type ReportRequest struct {
+	ReportedUserID string `json:"reported_user_id"`
+	Reason         string `json:"reason"`
+}
+
+// ─── Direct Conversations ──────────────────────────────────────────────────
+
+type DirectConversationRequest struct {
+	UserID string `json:"user_id"`
+}
+
+type DirectConversationResponse struct {
+	ChatID string `json:"chat_id"`
+}
+
+// ─── Public User Profile ───────────────────────────────────────────────────
+
+type UserPublicProfile struct {
+	ID            uuid.UUID      `json:"id"`
+	Username      string         `json:"username"`
+	DisplayName   string         `json:"display_name"`
+	AvatarURL     string         `json:"avatar_url,omitempty"`
+	Bio           string         `json:"bio"`
+	IsOnline      bool           `json:"is_online"`
+	LastSeen      *time.Time     `json:"last_seen,omitempty"`
+	ContactStatus *ContactStatus `json:"contact_status,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+}
+
+// ─── Avatar Upload ─────────────────────────────────────────────────────────
+
+type AvatarUploadResponse struct {
+	AvatarURL string `json:"avatar_url"`
+}

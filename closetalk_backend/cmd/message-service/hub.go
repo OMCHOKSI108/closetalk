@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"log"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/OMCHOKSI108/closetalk/internal/database"
 )
 
 type wsClient struct {
@@ -86,6 +90,21 @@ func (h *wsHub) removeClient(client *wsClient) {
 		delete(devices, client.deviceID)
 		if len(devices) == 0 {
 			delete(h.byUser, client.userID)
+		}
+	}
+
+	// Cleanup Valkey session and update last_seen
+	if database.Valkey != nil {
+		database.RemoveUserSession(context.Background(), client.userID, client.deviceID)
+		count, err := database.Valkey.SCard(context.Background(), "user_sessions:"+client.userID).Result()
+		if err == nil && count == 0 {
+			if database.Pool != nil {
+				_, err := database.Pool.Exec(context.Background(),
+					`UPDATE users SET last_seen = now() WHERE id = $1::uuid`, client.userID)
+				if err != nil {
+					log.Printf("[hub] failed to update last_seen for %s: %v", client.userID, err)
+				}
+			}
 		}
 	}
 

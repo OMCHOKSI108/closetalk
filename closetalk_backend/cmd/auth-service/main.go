@@ -220,11 +220,36 @@ func main() {
 		r.Delete("/groups/{id}/pin/{messageId}", handleUnpinMessage)
 	})
 
-	// User search (JWT required)
+	// User search & profile (JWT required)
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.RequireAuth)
 		r.Use(middleware.UserRateLimit)
 		r.Get("/users/search", handleUserSearch)
+		r.Get("/users/profile/{id}", handleUserProfile)
+		r.Put("/users/avatar", handleUploadAvatar)
+	})
+
+	// Serve uploaded avatars
+	uploadDir := os.Getenv("UPLOAD_DIR")
+	if uploadDir == "" {
+		uploadDir = "./uploads"
+	}
+	r.Get("/uploads/*", func(w http.ResponseWriter, r *http.Request) {
+		fs := http.StripPrefix("/uploads/", http.FileServer(http.Dir(uploadDir)))
+		fs.ServeHTTP(w, r)
+	})
+
+	// Contacts / Social (JWT required)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
+		r.Post("/contacts", handleSendContactRequest)
+		r.Post("/contacts/accept", handleAcceptContactRequest)
+		r.Post("/contacts/reject", handleRejectContactRequest)
+		r.Get("/contacts", handleListContacts)
+		r.Post("/users/block", handleBlockUser)
+		r.Post("/users/report", handleReportUser)
+		r.Post("/conversations/direct", handleCreateDirectConversation)
 	})
 
 	// Start server
@@ -1905,4 +1930,415 @@ func handleRevokeDevice(w http.ResponseWriter, r *http.Request) {
 	database.RemoveUserSession(ctx, userID, req.DeviceID)
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "device revoked"})
+}
+
+// ─── Contact Handlers ────────────────────────────────────────────────────────
+
+func handleSendContactRequest(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	var req model.ContactRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, model.ErrInvalidRequest)
+		return
+	}
+	if req.ContactID == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "contact_id is required"})
+		return
+	}
+	if req.ContactID == userID {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "cannot add yourself"})
+		return
+	}
+
+	ctx := context.Background()
+	// Check not blocked
+	var blocked bool
+	database.Pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM contacts WHERE user_id = $1 AND contact_id = $2 AND status = 'blocked')`,
+		req.ContactID, userID,
+	).Scan(&blocked)
+	if blocked {
+		writeError(w, http.StatusForbidden, &model.AppError{Code: "BLOCKED", Message: "you cannot add this user"})
+		return
+	}
+
+	// Upsert contact: if row exists (pending/sent/accepted), update; else insert
+	_, err := database.Pool.Exec(ctx,
+		`INSERT INTO contacts (user_id, contact_id, status)
+		 VALUES ($1, $2, 'sent')
+		 ON CONFLICT (user_id, contact_id)
+		 DO UPDATE SET status = CASE
+		   WHEN contacts.status = 'accepted' THEN 'accepted'
+		   WHEN contacts.status = 'blocked' THEN 'blocked'
+		   ELSE 'sent'
+		 END, updated_at = now()`,
+		userID, req.ContactID,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to send request"})
+		return
+	}
+
+	// Also create reverse row for the other user
+	_, err = database.Pool.Exec(ctx,
+		`INSERT INTO contacts (user_id, contact_id, status)
+		 VALUES ($1, $2, 'pending')
+		 ON CONFLICT (user_id, contact_id)
+		 DO UPDATE SET status = CASE
+		   WHEN contacts.status = 'accepted' THEN 'accepted'
+		   WHEN contacts.status = 'blocked' THEN 'blocked'
+		   ELSE 'pending'
+		 END, updated_at = now()`,
+		req.ContactID, userID,
+	)
+	if err != nil {
+		log.Printf("[contacts] reverse insert error: %v", err)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "contact request sent"})
+}
+
+func handleAcceptContactRequest(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	var req model.ContactRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, model.ErrInvalidRequest)
+		return
+	}
+	if req.ContactID == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "contact_id is required"})
+		return
+	}
+
+	ctx := context.Background()
+
+	// Check there's a pending request FROM the other user
+	var exists bool
+	database.Pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM contacts WHERE user_id = $1 AND contact_id = $2 AND status = 'pending')`,
+		userID, req.ContactID,
+	).Scan(&exists)
+	if !exists {
+		writeError(w, http.StatusNotFound, &model.AppError{Code: "NOT_FOUND", Message: "no pending request from this user"})
+		return
+	}
+
+	// Create or get direct conversation
+	var chatID string
+	err := database.Pool.QueryRow(ctx,
+		`SELECT id FROM conversations WHERE type = 'direct' AND id IN (
+		   SELECT conversation_id FROM conversation_participants WHERE user_id = $1
+		   INTERSECT
+		   SELECT conversation_id FROM conversation_participants WHERE user_id = $2
+		 ) LIMIT 1`,
+		userID, req.ContactID,
+	).Scan(&chatID)
+	if err != nil {
+		// Create new conversation
+		err = database.Pool.QueryRow(ctx,
+			`INSERT INTO conversations (type) VALUES ('direct') RETURNING id`,
+		).Scan(&chatID)
+		if err != nil {
+			log.Printf("[contacts] conversation create error: %v", err)
+		} else {
+			database.Pool.Exec(ctx,
+				`INSERT INTO conversation_participants (conversation_id, user_id) VALUES ($1, $2), ($1, $3)`,
+				chatID, userID, req.ContactID,
+			)
+		}
+	}
+
+	// Update both rows to accepted
+	database.Pool.Exec(ctx,
+		`UPDATE contacts SET status = 'accepted', conversation_id = COALESCE($3, conversation_id), updated_at = now()
+		 WHERE (user_id = $1 AND contact_id = $2)`,
+		userID, req.ContactID, chatID,
+	)
+	database.Pool.Exec(ctx,
+		`UPDATE contacts SET status = 'accepted', conversation_id = COALESCE($3, conversation_id), updated_at = now()
+		 WHERE (user_id = $1 AND contact_id = $2)`,
+		req.ContactID, userID, chatID,
+	)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":         "contact request accepted",
+		"conversation_id": chatID,
+	})
+}
+
+func handleRejectContactRequest(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	var req model.ContactRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, model.ErrInvalidRequest)
+		return
+	}
+	if req.ContactID == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "contact_id is required"})
+		return
+	}
+
+	ctx := context.Background()
+
+	// Remove both contact rows
+	database.Pool.Exec(ctx,
+		`DELETE FROM contacts WHERE (user_id = $1 AND contact_id = $2) OR (user_id = $2 AND contact_id = $1)`,
+		userID, req.ContactID,
+	)
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "contact request rejected"})
+}
+
+func handleListContacts(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	ctx := context.Background()
+
+	rows, err := database.Pool.Query(ctx,
+		`SELECT c.contact_id, c.status, c.conversation_id, c.created_at,
+		        u.username, u.display_name, u.avatar_url, u.bio, u.last_seen
+		 FROM contacts c
+		 JOIN users u ON u.id = c.contact_id
+		 WHERE c.user_id = $1 AND c.status IN ('sent', 'pending', 'accepted')
+		 ORDER BY c.created_at DESC`,
+		userID,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to list contacts"})
+		return
+	}
+	defer rows.Close()
+
+	contacts := []model.ContactResponse{}
+	for rows.Next() {
+		var c model.ContactResponse
+		var lastSeen *time.Time
+		rows.Scan(&c.ContactID, &c.Status, &c.ConversationID, &c.CreatedAt,
+			&c.Username, &c.DisplayName, &c.AvatarURL, &c.Bio, &lastSeen)
+		if lastSeen != nil {
+			c.LastSeen = lastSeen
+		}
+		// Check online via Valkey
+		count, _ := database.Valkey.SCard(ctx, "user_sessions:"+c.ContactID).Result()
+		c.IsOnline = count > 0
+		contacts = append(contacts, c)
+	}
+
+	writeJSON(w, http.StatusOK, model.ContactListResponse{Contacts: contacts})
+}
+
+func handleBlockUser(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	var req model.BlockRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, model.ErrInvalidRequest)
+		return
+	}
+	if req.BlockedUserID == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "blocked_user_id is required"})
+		return
+	}
+
+	ctx := context.Background()
+
+	// Upsert both directions to blocked
+	database.Pool.Exec(ctx,
+		`INSERT INTO contacts (user_id, contact_id, status)
+		 VALUES ($1, $2, 'blocked')
+		 ON CONFLICT (user_id, contact_id)
+		 DO UPDATE SET status = 'blocked', updated_at = now()`,
+		userID, req.BlockedUserID,
+	)
+	database.Pool.Exec(ctx,
+		`INSERT INTO contacts (user_id, contact_id, status)
+		 VALUES ($1, $2, 'blocked')
+		 ON CONFLICT (user_id, contact_id)
+		 DO UPDATE SET status = 'blocked', updated_at = now()`,
+		req.BlockedUserID, userID,
+	)
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "user blocked"})
+}
+
+func handleReportUser(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	var req model.ReportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, model.ErrInvalidRequest)
+		return
+	}
+	if req.ReportedUserID == "" || req.Reason == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "reported_user_id and reason are required"})
+		return
+	}
+
+	ctx := context.Background()
+	_, err := database.Pool.Exec(ctx,
+		`INSERT INTO reports (reporter_id, reported_user_id, reason) VALUES ($1, $2, $3)`,
+		userID, req.ReportedUserID, req.Reason,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to submit report"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "user reported"})
+}
+
+func handleCreateDirectConversation(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	var req model.DirectConversationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, model.ErrInvalidRequest)
+		return
+	}
+	if req.UserID == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "user_id is required"})
+		return
+	}
+
+	ctx := context.Background()
+
+	// Check if conversation already exists
+	var chatID string
+	err := database.Pool.QueryRow(ctx,
+		`SELECT c.id FROM conversations c
+		 JOIN conversation_participants p1 ON p1.conversation_id = c.id AND p1.user_id = $1
+		 JOIN conversation_participants p2 ON p2.conversation_id = c.id AND p2.user_id = $2
+		 WHERE c.type = 'direct'
+		 LIMIT 1`,
+		userID, req.UserID,
+	).Scan(&chatID)
+
+	if err != nil {
+		// Create new conversation
+		err = database.Pool.QueryRow(ctx,
+			`INSERT INTO conversations (type) VALUES ('direct') RETURNING id`,
+		).Scan(&chatID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to create conversation"})
+			return
+		}
+		database.Pool.Exec(ctx,
+			`INSERT INTO conversation_participants (conversation_id, user_id) VALUES ($1, $2), ($1, $3)`,
+			chatID, userID, req.UserID,
+		)
+	}
+
+	writeJSON(w, http.StatusOK, model.DirectConversationResponse{ChatID: chatID})
+}
+
+// ─── User Profile ────────────────────────────────────────────────────────────
+
+func handleUserProfile(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	profileID := chi.URLParam(r, "id")
+	if profileID == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "user id is required"})
+		return
+	}
+
+	ctx := context.Background()
+
+	var profile model.UserPublicProfile
+	var lastSeen *time.Time
+	err := database.Pool.QueryRow(ctx,
+		`SELECT id, username, display_name, avatar_url, bio, last_seen, created_at
+		 FROM users WHERE id = $1 AND deleted_at IS NULL`,
+		profileID,
+	).Scan(&profile.ID, &profile.Username, &profile.DisplayName,
+		&profile.AvatarURL, &profile.Bio, &lastSeen, &profile.CreatedAt)
+	if err != nil {
+		writeError(w, http.StatusNotFound, &model.AppError{Code: "NOT_FOUND", Message: "user not found"})
+		return
+	}
+	if lastSeen != nil {
+		profile.LastSeen = lastSeen
+	}
+
+	// Check online
+	count, _ := database.Valkey.SCard(ctx, "user_sessions:"+profileID).Result()
+	profile.IsOnline = count > 0
+
+	// Check contact status between current user and profile user
+	if profileID != userID {
+		var status string
+		err = database.Pool.QueryRow(ctx,
+			`SELECT status FROM contacts WHERE user_id = $1 AND contact_id = $2`,
+			userID, profileID,
+		).Scan(&status)
+		if err == nil {
+			s := model.ContactStatus(status)
+			profile.ContactStatus = &s
+		}
+	}
+
+	writeJSON(w, http.StatusOK, profile)
+}
+
+// ─── Avatar Upload ───────────────────────────────────────────────────────────
+
+func handleUploadAvatar(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+
+	// Max 5MB
+	r.Body = http.MaxBytesReader(w, r.Body, 5<<20)
+	if err := r.ParseMultipartForm(5 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "INVALID_FILE", Message: "file too large or invalid"})
+		return
+	}
+
+	file, header, err := r.FormFile("avatar")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "INVALID_FILE", Message: "avatar file is required"})
+		return
+	}
+	defer file.Close()
+
+	// Validate file type
+	contentType := header.Header.Get("Content-Type")
+	if contentType != "image/jpeg" && contentType != "image/png" && contentType != "image/webp" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "INVALID_FILE", Message: "only jpeg, png, and webp are allowed"})
+		return
+	}
+
+	// Read file bytes
+	data := make([]byte, header.Size)
+	if _, err := file.Read(data); err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "failed to read file"})
+		return
+	}
+
+	// Save to disk
+	uploadDir := os.Getenv("UPLOAD_DIR")
+	if uploadDir == "" {
+		uploadDir = "./uploads/avatars"
+	}
+	os.MkdirAll(uploadDir, 0755)
+
+	filename := userID + "_" + fmt.Sprintf("%d", time.Now().Unix()) + ".jpg"
+	filePath := uploadDir + "/" + filename
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "failed to save file"})
+		return
+	}
+
+	// Build URL
+	baseURL := os.Getenv("PUBLIC_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:8081"
+	}
+	avatarURL := baseURL + "/uploads/avatars/" + filename
+
+	// Update user record
+	ctx := context.Background()
+	_, err = database.Pool.Exec(ctx,
+		`UPDATE users SET avatar_url = $1, updated_at = now() WHERE id = $2`,
+		avatarURL, userID,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to update avatar"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, model.AvatarUploadResponse{AvatarURL: avatarURL})
 }
