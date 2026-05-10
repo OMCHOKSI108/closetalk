@@ -65,7 +65,10 @@ func DeleteSession(ctx context.Context, refreshToken string) error {
 }
 
 func StoreUserSession(ctx context.Context, userID string, deviceID string, ttl time.Duration) error {
-	return Valkey.SAdd(ctx, "user_sessions:"+userID, deviceID).Err()
+	if err := Valkey.SAdd(ctx, "user_sessions:"+userID, deviceID).Err(); err != nil {
+		return err
+	}
+	return Valkey.Expire(ctx, "user_sessions:"+userID, ttl).Err()
 }
 
 func RemoveUserSession(ctx context.Context, userID string, deviceID string) error {
@@ -87,8 +90,8 @@ func CheckRateLimit(ctx context.Context, key string, limit int, window time.Dura
 
 // Recovery rate limit
 
-func CheckRecoveryRateLimit(ctx context.Context, userID string) (int64, error) {
-	key := "recover:attempts:" + userID
+func CheckRecoveryRateLimit(ctx context.Context, ip string) (int64, error) {
+	key := "recover:attempts:ip:" + ip
 	val, err := Valkey.Incr(ctx, key).Result()
 	if err != nil {
 		return 0, err
@@ -99,6 +102,6 @@ func CheckRecoveryRateLimit(ctx context.Context, userID string) (int64, error) {
 	return val, nil
 }
 
-func ResetRecoveryRateLimit(ctx context.Context, userID string) error {
-	return Valkey.Del(ctx, "recover:attempts:"+userID).Err()
+func ResetRecoveryRateLimit(ctx context.Context, ip string) error {
+	return Valkey.Del(ctx, "recover:attempts:ip:"+ip).Err()
 }

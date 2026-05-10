@@ -11,7 +11,7 @@ import (
 type MessageStore interface {
 	InsertMessage(ctx context.Context, msg *model.Message) error
 	GetMessage(ctx context.Context, messageID uuid.UUID) (*model.Message, error)
-	GetMessages(ctx context.Context, chatID string, cursor time.Time, limit int) ([]*model.Message, error)
+	GetMessages(ctx context.Context, chatID string, cursor time.Time, limit int) ([]*model.Message, bool, error)
 	UpdateMessage(ctx context.Context, msg *model.Message) error
 	DeleteMessage(ctx context.Context, messageID uuid.UUID) error
 	AddReaction(ctx context.Context, messageID uuid.UUID, userID string, emoji string) error

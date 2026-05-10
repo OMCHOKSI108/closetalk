@@ -116,6 +116,18 @@ func InitDynamoDBSchema() error {
 			AttrDef: []types.AttributeDefinition{
 				{AttributeName: aws.String("user_id"), AttributeType: types.ScalarAttributeTypeS},
 				{AttributeName: aws.String("sort_key"), AttributeType: types.ScalarAttributeTypeS},
+				{AttributeName: aws.String("message_id"), AttributeType: types.ScalarAttributeTypeS},
+			},
+			GSIs: []types.GlobalSecondaryIndex{
+				{
+					IndexName: aws.String("message_id-index"),
+					KeySchema: []types.KeySchemaElement{
+						{AttributeName: aws.String("message_id"), KeyType: types.KeyTypeHash},
+					},
+					Projection: &types.Projection{
+						ProjectionType: types.ProjectionTypeAll,
+					},
+				},
 			},
 		},
 	}
@@ -299,7 +311,7 @@ func (s *DynamoDBStore) GetMessage(ctx context.Context, messageID uuid.UUID) (*m
 	return unmarshalMessage(result.Items[0])
 }
 
-func (s *DynamoDBStore) GetMessages(ctx context.Context, chatID string, cursor time.Time, limit int) ([]*model.Message, error) {
+func (s *DynamoDBStore) GetMessages(ctx context.Context, chatID string, cursor time.Time, limit int) ([]*model.Message, bool, error) {
 	cursorKey := sortKeyFromTime(cursor, uuid.Nil)
 
 	expr := "chat_id = :cid AND sort_key < :cursor"
@@ -316,8 +328,10 @@ func (s *DynamoDBStore) GetMessages(ctx context.Context, chatID string, cursor t
 		ScanIndexForward:          aws.Bool(false),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("get messages: %w", err)
+		return nil, false, fmt.Errorf("get messages: %w", err)
 	}
+
+	hasMore := result.LastEvaluatedKey != nil
 
 	messages := make([]*model.Message, 0, len(result.Items))
 	for _, item := range result.Items {
@@ -330,7 +344,7 @@ func (s *DynamoDBStore) GetMessages(ctx context.Context, chatID string, cursor t
 		}
 	}
 
-	return messages, nil
+	return messages, hasMore, nil
 }
 
 func (s *DynamoDBStore) UpdateMessage(ctx context.Context, msg *model.Message) error {
@@ -493,33 +507,34 @@ func (s *DynamoDBStore) BookmarkMessage(ctx context.Context, userID string, mess
 func (s *DynamoDBStore) RemoveBookmark(ctx context.Context, userID string, messageID uuid.UUID) error {
 	result, err := Dynamo.Query(ctx, &dynamodb.QueryInput{
 		TableName:              aws.String("closetalk-bookmarks"),
-		KeyConditionExpression: aws.String("user_id = :uid"),
+		IndexName:              aws.String("message_id-index"),
+		KeyConditionExpression: aws.String("message_id = :mid"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":uid": &types.AttributeValueMemberS{Value: userID},
+			":mid": &types.AttributeValueMemberS{Value: messageID.String()},
 		},
+		Limit: aws.Int32(1),
 	})
 	if err != nil {
 		return err
 	}
 
-	for _, item := range result.Items {
-		var db dynamoBookmark
-		if err := attributevalue.UnmarshalMap(item, &db); err != nil {
-			continue
-		}
-		if db.MessageID == messageID.String() {
-			_, err = Dynamo.DeleteItem(ctx, &dynamodb.DeleteItemInput{
-				TableName: aws.String("closetalk-bookmarks"),
-				Key: map[string]types.AttributeValue{
-					"user_id":  &types.AttributeValueMemberS{Value: userID},
-					"sort_key": &types.AttributeValueMemberS{Value: db.SortKey},
-				},
-			})
-			return err
-		}
+	if len(result.Items) == 0 {
+		return nil
 	}
 
-	return nil
+	var db dynamoBookmark
+	if err := attributevalue.UnmarshalMap(result.Items[0], &db); err != nil {
+		return err
+	}
+
+	_, err = Dynamo.DeleteItem(ctx, &dynamodb.DeleteItemInput{
+		TableName: aws.String("closetalk-bookmarks"),
+		Key: map[string]types.AttributeValue{
+			"user_id":  &types.AttributeValueMemberS{Value: db.UserID},
+			"sort_key": &types.AttributeValueMemberS{Value: db.SortKey},
+		},
+	})
+	return err
 }
 
 func (s *DynamoDBStore) ListBookmarks(ctx context.Context, userID string) ([]model.BookmarkResponse, error) {

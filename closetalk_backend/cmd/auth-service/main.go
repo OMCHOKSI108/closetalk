@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -48,24 +49,25 @@ type googleKey struct {
 }
 
 type googleTokenPayload struct {
-	Iss string `json:"iss"`
-	Sub string `json:"sub"`
-	Azp string `json:"azp"`
-	Aud string `json:"aud"`
-	Iat string `json:"iat"`
-	Exp string `json:"exp"`
-	Email string `json:"email"`
+	Iss           string `json:"iss"`
+	Sub           string `json:"sub"`
+	Azp           string `json:"azp"`
+	Aud           string `json:"aud"`
+	Iat           int64  `json:"iat"`
+	Exp           int64  `json:"exp"`
+	Email         string `json:"email"`
 	EmailVerified string `json:"email_verified"`
-	Name string `json:"name"`
-	Picture string `json:"picture"`
-	GivenName string `json:"given_name"`
-	FamilyName string `json:"family_name"`
+	Name          string `json:"name"`
+	Picture       string `json:"picture"`
+	GivenName     string `json:"given_name"`
+	FamilyName    string `json:"family_name"`
 }
 
 // Cache Google's public keys (refreshed every hour)
 var (
 	googleKeysCache     []googleKey
 	googleKeysCacheTime time.Time
+	googleClientID      string
 )
 
 func main() {
@@ -74,6 +76,8 @@ func main() {
 
 	// Initialize auth
 	auth.InitJWT()
+
+	googleClientID = os.Getenv("GOOGLE_CLIENT_ID")
 
 	// Connect databases
 	if err := database.ConnectNeon(); err != nil {
@@ -143,6 +147,7 @@ func main() {
 		r.Post("/refresh", handleRefresh)
 		r.Post("/recover", handleRecover)
 		r.Post("/recover/email", handleRecoverEmail)
+		r.Post("/recover/email/complete", handleRecoverEmailComplete)
 	})
 
 	// Auth routes (JWT required)
@@ -288,8 +293,14 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	parsedID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
+
 	// Generate tokens
-	accessToken, _ := auth.GenerateAccessToken(model.ParseUUID(userID), false)
+	accessToken, _ := auth.GenerateAccessToken(parsedID, false)
 	refreshToken, _ := auth.GenerateRefreshToken()
 
 	database.StoreSession(ctx, refreshToken, userID, "", 7*24*time.Hour)
@@ -298,7 +309,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		AccessToken:   accessToken,
 		RefreshToken:  refreshToken,
 		ExpiresIn:     900,
-		User:          model.UserResponse{ID: model.ParseUUID(userID), Email: &req.Email, DisplayName: req.DisplayName},
+		User:          model.UserResponse{ID: parsedID, Email: &req.Email, DisplayName: req.DisplayName},
 		RecoveryCodes: codes,
 	})
 }
@@ -416,10 +427,16 @@ func handleGoogleOAuth(w http.ResponseWriter, r *http.Request, idToken string) {
 		userID = uuid.New().String()
 		now := time.Now()
 
+		parsedID, err := model.ParseUUID(userID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+			return
+		}
+
 		_, err = database.Pool.Exec(ctx,
 			`INSERT INTO users (id, email, display_name, avatar_url, oauth_provider, is_admin, created_at, updated_at)
 			 VALUES ($1, $2, $3, $4, 'google', false, $5, $5)`,
-			model.ParseUUID(userID), email, displayName, avatarURL, now,
+			parsedID, email, displayName, avatarURL, now,
 		)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to create user"})
@@ -429,12 +446,18 @@ func handleGoogleOAuth(w http.ResponseWriter, r *http.Request, idToken string) {
 		// Insert default user_settings
 		database.Pool.Exec(ctx,
 			`INSERT INTO user_settings (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
-			model.ParseUUID(userID),
+			parsedID,
 		)
 	}
 
+	parsedID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
+
 	// Generate tokens
-	accessToken, _ := auth.GenerateAccessToken(model.ParseUUID(userID), false)
+	accessToken, _ := auth.GenerateAccessToken(parsedID, false)
 	refreshToken, _ := auth.GenerateRefreshToken()
 	database.StoreSession(ctx, refreshToken, userID, "", 7*24*time.Hour)
 
@@ -442,7 +465,7 @@ func handleGoogleOAuth(w http.ResponseWriter, r *http.Request, idToken string) {
 	var user model.User
 	err = database.Pool.QueryRow(ctx,
 		`SELECT id, email, display_name, avatar_url, bio, is_admin, created_at FROM users WHERE id = $1`,
-		model.ParseUUID(userID),
+		parsedID,
 	).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.Bio, &user.IsAdmin, &user.CreatedAt)
 
 	if err != nil {
@@ -567,6 +590,16 @@ func verifyGoogleIDToken(idToken string) (*googleTokenPayload, error) {
 		return nil, fmt.Errorf("invalid issuer: %s", payload.Iss)
 	}
 
+	// Verify audience against configured client ID
+	if googleClientID != "" && payload.Aud != googleClientID {
+		return nil, fmt.Errorf("invalid audience: %s (expected %s)", payload.Aud, googleClientID)
+	}
+
+	// Verify token is not expired
+	if payload.Exp > 0 && time.Now().Unix() > payload.Exp {
+		return nil, fmt.Errorf("token expired at %d", payload.Exp)
+	}
+
 	return &payload, nil
 }
 
@@ -599,7 +632,13 @@ func handleRefresh(w http.ResponseWriter, r *http.Request) {
 	// Delete old session
 	database.DeleteSession(ctx, req.RefreshToken)
 
-	accessToken, _ := auth.GenerateAccessToken(model.ParseUUID(userID), false)
+	parsedID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
+
+	accessToken, _ := auth.GenerateAccessToken(parsedID, false)
 	newRefreshToken, _ := auth.GenerateRefreshToken()
 
 	database.StoreSession(ctx, newRefreshToken, userID, deviceID, 7*24*time.Hour)
@@ -628,8 +667,12 @@ func handleRecover(w http.ResponseWriter, r *http.Request) {
 
 	ctx := context.Background()
 
-	// Check rate limit
-	attempts, err := database.CheckRecoveryRateLimit(ctx, codeHash)
+	// Rate limit by IP address to prevent brute force across all 10 codes
+	clientIP, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		clientIP = r.RemoteAddr
+	}
+	attempts, err := database.CheckRecoveryRateLimit(ctx, clientIP)
 	if err == nil && attempts > 5 {
 		writeError(w, http.StatusTooManyRequests, model.ErrRecoveryLimit)
 		return
@@ -652,13 +695,19 @@ func handleRecover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	parsedID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
+
 	// Mark code as used
 	database.Pool.Exec(ctx,
 		`UPDATE recovery_codes SET is_used = true, used_at = now() WHERE code_hash = $1`, codeHash)
 
-	database.ResetRecoveryRateLimit(ctx, codeHash)
+	database.ResetRecoveryRateLimit(ctx, clientIP)
 
-	accessToken, _ := auth.GenerateAccessToken(model.ParseUUID(userID), false)
+	accessToken, _ := auth.GenerateAccessToken(parsedID, false)
 	refreshToken, _ := auth.GenerateRefreshToken()
 	database.StoreSession(ctx, refreshToken, userID, "", 7*24*time.Hour)
 
@@ -666,7 +715,7 @@ func handleRecover(w http.ResponseWriter, r *http.Request) {
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		ExpiresIn:    900,
-		User:         model.UserResponse{ID: model.ParseUUID(userID)},
+		User:         model.UserResponse{ID: parsedID},
 	})
 }
 
@@ -710,6 +759,65 @@ func handleRecoverEmail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"message": "recovery email sent (if account exists)",
 	})
+}
+
+func handleRecoverEmailComplete(w http.ResponseWriter, r *http.Request) {
+	var req model.RecoverEmailCompleteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, model.ErrInvalidRequest)
+		return
+	}
+
+	if req.Token == "" || req.NewPassword == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "token and new_password are required"})
+		return
+	}
+
+	if len(req.NewPassword) < 8 {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "WEAK_PASSWORD", Message: "password must be at least 8 characters"})
+		return
+	}
+
+	ctx := context.Background()
+
+	// Look up recovery token
+	sessionData, err := database.GetSession(ctx, "recover:"+req.Token)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, &model.AppError{Code: "INVALID_TOKEN", Message: "invalid or expired recovery token"})
+		return
+	}
+
+	// sessionData is "userID:deviceID"
+	userID, _, _ := strings.Cut(sessionData, ":")
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, &model.AppError{Code: "INVALID_TOKEN", Message: "invalid recovery token"})
+		return
+	}
+
+	// Hash new password
+	newHash, err := auth.HashPassword(req.NewPassword)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "failed to process password"})
+		return
+	}
+
+	// Update password
+	_, err = database.Pool.Exec(ctx,
+		`UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2`, newHash, userID,
+	)
+	if err != nil {
+		log.Printf("[recover] password update error: %v", err)
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to update password"})
+		return
+	}
+
+	// Invalidate all sessions for this user
+	database.Valkey.Del(ctx, "user_sessions:"+userID)
+
+	// Delete the recovery token
+	database.DeleteSession(ctx, "recover:"+req.Token)
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "password updated successfully"})
 }
 
 var sesClient *sesv2.Client

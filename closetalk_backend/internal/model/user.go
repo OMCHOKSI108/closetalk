@@ -6,9 +6,12 @@ import (
 	"github.com/google/uuid"
 )
 
-func ParseUUID(s string) uuid.UUID {
-	id, _ := uuid.Parse(s)
-	return id
+func ParseUUID(s string) (uuid.UUID, error) {
+	id, err := uuid.Parse(s)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return id, nil
 }
 
 type User struct {
@@ -81,6 +84,11 @@ type RecoverRequest struct {
 
 type RecoverEmailRequest struct {
 	Email string `json:"email"`
+}
+
+type RecoverEmailCompleteRequest struct {
+	Token       string `json:"token"`
+	NewPassword string `json:"new_password"`
 }
 
 type ChangePasswordRequest struct {

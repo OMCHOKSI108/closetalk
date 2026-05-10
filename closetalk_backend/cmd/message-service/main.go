@@ -351,7 +351,7 @@ func handleGetMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	messages, err := database.GlobalStore.GetMessages(context.Background(), chatID, cursor, limit)
+	messages, hasMore, err := database.GlobalStore.GetMessages(context.Background(), chatID, cursor, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL", "Failed to fetch messages")
 		return
@@ -359,7 +359,7 @@ func handleGetMessages(w http.ResponseWriter, r *http.Request) {
 
 	resp := model.PaginatedMessages{
 		Messages: make([]model.MessageResponse, 0, len(messages)),
-		HasMore:  len(messages) >= limit,
+		HasMore:  hasMore,
 	}
 
 	for _, msg := range messages {
@@ -412,6 +412,18 @@ func handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if database.Pool != nil {
+		var isMember bool
+		database.Pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM conversation_participants WHERE conversation_id = $1::uuid AND user_id = $2)`,
+			msg.ChatID, userID,
+		).Scan(&isMember)
+		if !isMember {
+			writeError(w, http.StatusForbidden, "FORBIDDEN", "You are no longer a member of this conversation")
+			return
+		}
+	}
+
 	if time.Since(msg.CreatedAt) > 15*time.Minute {
 		writeError(w, http.StatusForbidden, "EXPIRED", "Can only edit within 15 minutes")
 		return
@@ -459,6 +471,18 @@ func handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 	if msg.SenderID != userID {
 		writeError(w, http.StatusForbidden, "FORBIDDEN", "Cannot delete another user's message")
 		return
+	}
+
+	if database.Pool != nil {
+		var isMember bool
+		database.Pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM conversation_participants WHERE conversation_id = $1::uuid AND user_id = $2)`,
+			msg.ChatID, userID,
+		).Scan(&isMember)
+		if !isMember {
+			writeError(w, http.StatusForbidden, "FORBIDDEN", "You are no longer a member of this conversation")
+			return
+		}
 	}
 
 	if time.Since(msg.CreatedAt) > 15*time.Minute {
@@ -640,13 +664,19 @@ func handleSyncMessages(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
 	// Get user's conversation IDs from Neon
+	parsedUserID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION", "invalid user_id")
+		return
+	}
+
 	var convIDs []string
 	if database.Pool != nil {
 		rows, err := database.Pool.Query(ctx,
 			`SELECT cp.conversation_id FROM conversation_participants cp
 			 JOIN conversations c ON c.id = cp.conversation_id
 			 WHERE cp.user_id = $1 ORDER BY c.last_message_at DESC NULLS LAST`,
-			model.ParseUUID(userID),
+			parsedUserID,
 		)
 		if err == nil {
 			defer rows.Close()
@@ -669,7 +699,7 @@ func handleSyncMessages(w http.ResponseWriter, r *http.Request) {
 	// Query messages from ScyllaDB for each conversation
 	allMessages := []*model.Message{}
 	for _, convID := range convIDs {
-		messages, err := database.GlobalStore.GetMessages(ctx, convID, cursor, limit)
+		messages, _, err := database.GlobalStore.GetMessages(ctx, convID, cursor, limit)
 		if err != nil {
 			continue
 		}
@@ -725,13 +755,18 @@ func handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 	statuses := []model.StatusEntry{}
 
 	if database.Pool != nil {
+		parsedUserID, err := model.ParseUUID(userID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "VALIDATION", "invalid user_id")
+			return
+		}
 		rows, err := database.Pool.Query(ctx, `
 			SELECT DISTINCT cp2.user_id
 			FROM conversation_participants cp1
 			JOIN conversation_participants cp2 ON cp1.conversation_id = cp2.conversation_id
 			WHERE cp1.user_id = $1 AND cp2.user_id != $1
 			LIMIT 50
-		`, model.ParseUUID(userID))
+		`, parsedUserID)
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {

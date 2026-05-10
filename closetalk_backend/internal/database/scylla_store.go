@@ -50,7 +50,7 @@ func (s *ScyllaMessageStore) GetMessage(ctx context.Context, messageID uuid.UUID
 	return &msg, nil
 }
 
-func (s *ScyllaMessageStore) GetMessages(ctx context.Context, chatID string, cursor time.Time, limit int) ([]*model.Message, error) {
+func (s *ScyllaMessageStore) GetMessages(ctx context.Context, chatID string, cursor time.Time, limit int) ([]*model.Message, bool, error) {
 	iter := Scylla.Query(
 		`SELECT chat_id, created_at, message_id, sender_id, content, content_type,
 		 media_url, media_id, reply_to_id, status, moderation_status, is_deleted
@@ -73,10 +73,11 @@ func (s *ScyllaMessageStore) GetMessages(ctx context.Context, chatID string, cur
 	}
 
 	if err := iter.Close(); err != nil {
-		return nil, fmt.Errorf("get messages: %w", err)
+		return nil, false, fmt.Errorf("get messages: %w", err)
 	}
 
-	return messages, nil
+	hasMore := len(messages) == limit
+	return messages, hasMore, nil
 }
 
 func (s *ScyllaMessageStore) UpdateMessage(ctx context.Context, msg *model.Message) error {

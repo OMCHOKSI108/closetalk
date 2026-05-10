@@ -34,7 +34,11 @@ func generateInviteCode() (string, error) {
 
 func handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
-	parsedUserID := model.ParseUUID(userID)
+	parsedUserID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
 
 	var req model.CreateGroupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -108,7 +112,10 @@ func handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 
 	// Add members
 	for _, memberIDStr := range req.MemberIDs {
-		memberID := model.ParseUUID(memberIDStr)
+		memberID, err := model.ParseUUID(memberIDStr)
+		if err != nil {
+			continue
+		}
 		if memberID == parsedUserID {
 			continue
 		}
@@ -146,7 +153,16 @@ func handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 func handleGetGroup(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
 	groupIDStr := chi.URLParam(r, "id")
-	groupID := model.ParseUUID(groupIDStr)
+	groupID, err := model.ParseUUID(groupIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "invalid group_id"})
+		return
+	}
+	parsedUserID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
 
 	ctx := context.Background()
 
@@ -154,7 +170,7 @@ func handleGetGroup(w http.ResponseWriter, r *http.Request) {
 	var isMember bool
 	database.Pool.QueryRow(ctx,
 		`SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2)`,
-		groupID, model.ParseUUID(userID),
+		groupID, parsedUserID,
 	).Scan(&isMember)
 	if !isMember {
 		writeError(w, http.StatusForbidden, &model.AppError{Code: "NOT_MEMBER", Message: "you are not a member of this group"})
@@ -162,7 +178,7 @@ func handleGetGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var g model.Group
-	err := database.Pool.QueryRow(ctx,
+	err = database.Pool.QueryRow(ctx,
 		`SELECT g.id, g.conversation_id, g.name, COALESCE(g.description, ''), COALESCE(g.avatar_url, ''),
 		        g.created_by, g.is_public, g.member_limit, g.created_at, g.updated_at,
 		        COALESCE(g.invite_code, ''), COALESCE(gs.message_retention, 'off'), COALESCE(gs.disappearing_msg, 'off'),
@@ -259,6 +275,12 @@ func handleGetGroup(w http.ResponseWriter, r *http.Request) {
 func handleListGroups(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
 
+	parsedUserID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
+
 	ctx := context.Background()
 	rows, err := database.Pool.Query(ctx,
 		`SELECT g.id, g.name, g.description, g.avatar_url, g.is_public, g.member_limit,
@@ -269,7 +291,7 @@ func handleListGroups(w http.ResponseWriter, r *http.Request) {
 		 JOIN group_members gm ON gm.group_id = g.id
 		 WHERE gm.user_id = $1 AND gm.left_at IS NULL
 		 ORDER BY g.updated_at DESC`,
-		model.ParseUUID(userID),
+		parsedUserID,
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "failed to list groups"})
@@ -304,15 +326,24 @@ func handleListGroups(w http.ResponseWriter, r *http.Request) {
 func handleGenerateInvite(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
 	groupIDStr := chi.URLParam(r, "id")
-	groupID := model.ParseUUID(groupIDStr)
+	groupID, err := model.ParseUUID(groupIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "invalid group_id"})
+		return
+	}
+	parsedUserID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
 
 	ctx := context.Background()
 
 	// Verify admin
 	var role string
-	err := database.Pool.QueryRow(ctx,
+	err = database.Pool.QueryRow(ctx,
 		`SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2`,
-		groupID, model.ParseUUID(userID),
+		groupID, parsedUserID,
 	).Scan(&role)
 	if err != nil || role != "admin" {
 		writeError(w, http.StatusForbidden, &model.AppError{Code: "ADMIN_ONLY", Message: "only admins can generate invites"})
@@ -345,7 +376,11 @@ func handleGenerateInvite(w http.ResponseWriter, r *http.Request) {
 
 func handleJoinGroup(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
-	parsedUserID := model.ParseUUID(userID)
+	parsedUserID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
 
 	var req model.JoinGroupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -358,7 +393,7 @@ func handleJoinGroup(w http.ResponseWriter, r *http.Request) {
 	// Find group by invite code
 	var groupID, convID uuid.UUID
 	var memberCount, memberLimit int
-	err := database.Pool.QueryRow(ctx,
+	err = database.Pool.QueryRow(ctx,
 		`SELECT g.id, g.conversation_id,
 		        (SELECT COUNT(*) FROM group_members WHERE group_id = g.id),
 		        g.member_limit
@@ -428,7 +463,16 @@ func handleJoinGroup(w http.ResponseWriter, r *http.Request) {
 func handleAddMembers(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
 	groupIDStr := chi.URLParam(r, "id")
-	groupID := model.ParseUUID(groupIDStr)
+	groupID, err := model.ParseUUID(groupIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "invalid group_id"})
+		return
+	}
+	parsedUserID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
 
 	var req model.AddMemberRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -440,9 +484,9 @@ func handleAddMembers(w http.ResponseWriter, r *http.Request) {
 
 	// Verify admin
 	var role string
-	err := database.Pool.QueryRow(ctx,
+	err = database.Pool.QueryRow(ctx,
 		`SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2`,
-		groupID, model.ParseUUID(userID),
+		groupID, parsedUserID,
 	).Scan(&role)
 	if err != nil || role != "admin" {
 		writeError(w, http.StatusForbidden, &model.AppError{Code: "ADMIN_ONLY", Message: "only admins can add members"})
@@ -455,43 +499,64 @@ func handleAddMembers(w http.ResponseWriter, r *http.Request) {
 		`SELECT conversation_id FROM groups WHERE id = $1`, groupID,
 	).Scan(&convID)
 
-	// Check member limit
-	var memberCount, memberLimit int
-	database.Pool.QueryRow(ctx,
-		`SELECT COUNT(*), g.member_limit FROM group_members gm
-		 JOIN groups g ON g.id = gm.group_id
-		 WHERE gm.group_id = $1 AND gm.left_at IS NULL
-		 GROUP BY g.member_limit`,
-		groupID,
-	).Scan(&memberCount, &memberLimit)
-
 	added := []string{}
 	skipped := []string{}
-	for _, memberIDStr := range req.UserIDs {
-		memberID := model.ParseUUID(memberIDStr)
 
-		if memberCount >= memberLimit {
+	tx, err := database.Pool.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "failed to add members"})
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	// Lock group row to prevent concurrent member limit races
+	var memberLimit int
+	if err := tx.QueryRow(ctx,
+		`SELECT member_limit FROM groups WHERE id = $1 FOR UPDATE`, groupID,
+	).Scan(&memberLimit); err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "failed to check member limit"})
+		return
+	}
+
+	for _, memberIDStr := range req.UserIDs {
+		memberID, err := model.ParseUUID(memberIDStr)
+		if err != nil {
+			continue
+		}
+
+		// Atomic count check inside transaction
+		var currentCount int
+		tx.QueryRow(ctx,
+			`SELECT COUNT(*) FROM group_members WHERE group_id = $1 AND left_at IS NULL`,
+			groupID,
+		).Scan(&currentCount)
+
+		if currentCount >= memberLimit {
 			skipped = append(skipped, memberIDStr)
 			continue
 		}
 
-		_, err := database.Pool.Exec(ctx,
+		_, err = tx.Exec(ctx,
 			`INSERT INTO group_members (group_id, user_id, role, invited_by) VALUES ($1, $2, 'member', $3)
 			 ON CONFLICT DO NOTHING`,
-			groupID, memberID, model.ParseUUID(userID),
+			groupID, memberID, parsedUserID,
 		)
 		if err != nil {
 			skipped = append(skipped, memberIDStr)
 			continue
 		}
 
-		database.Pool.Exec(ctx,
+		tx.Exec(ctx,
 			`INSERT INTO conversation_participants (conversation_id, user_id) VALUES ($1, $2)
 			 ON CONFLICT DO NOTHING`,
 			convID, memberID,
 		)
-		memberCount++
 		added = append(added, memberIDStr)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "failed to add members"})
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -504,16 +569,29 @@ func handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
 	groupIDStr := chi.URLParam(r, "id")
 	targetIDStr := chi.URLParam(r, "userId")
-	groupID := model.ParseUUID(groupIDStr)
-	targetID := model.ParseUUID(targetIDStr)
+	groupID, err := model.ParseUUID(groupIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "invalid group_id"})
+		return
+	}
+	targetID, err := model.ParseUUID(targetIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "invalid target_id"})
+		return
+	}
+	parsedUserID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
 
 	ctx := context.Background()
 
 	// Verify admin
 	var role string
-	err := database.Pool.QueryRow(ctx,
+	err = database.Pool.QueryRow(ctx,
 		`SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2`,
-		groupID, model.ParseUUID(userID),
+		groupID, parsedUserID,
 	).Scan(&role)
 	if err != nil || role != "admin" {
 		writeError(w, http.StatusForbidden, &model.AppError{Code: "ADMIN_ONLY", Message: "only admins can remove members"})
@@ -526,7 +604,7 @@ func handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 		`SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2`,
 		groupID, targetID,
 	).Scan(&targetRole)
-	if targetRole == "admin" && role == "admin" && model.ParseUUID(userID) != targetID {
+	if targetRole == "admin" && role == "admin" && parsedUserID != targetID {
 		writeError(w, http.StatusForbidden, &model.AppError{Code: "ADMIN_CANT_REMOVE_ADMIN", Message: "admins cannot remove other admins"})
 		return
 	}
@@ -567,8 +645,21 @@ func handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
 	groupIDStr := chi.URLParam(r, "id")
 	targetIDStr := chi.URLParam(r, "userId")
-	groupID := model.ParseUUID(groupIDStr)
-	targetID := model.ParseUUID(targetIDStr)
+	groupID, err := model.ParseUUID(groupIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "invalid group_id"})
+		return
+	}
+	targetID, err := model.ParseUUID(targetIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "invalid target_id"})
+		return
+	}
+	parsedUserID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
 
 	var req model.UpdateRoleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -585,9 +676,9 @@ func handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 
 	// Verify requester is admin
 	var role string
-	err := database.Pool.QueryRow(ctx,
+	err = database.Pool.QueryRow(ctx,
 		`SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2`,
-		groupID, model.ParseUUID(userID),
+		groupID, parsedUserID,
 	).Scan(&role)
 	if err != nil || role != "admin" {
 		writeError(w, http.StatusForbidden, &model.AppError{Code: "ADMIN_ONLY", Message: "only admins can change roles"})
@@ -609,8 +700,16 @@ func handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 func handleLeaveGroup(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
 	groupIDStr := chi.URLParam(r, "id")
-	groupID := model.ParseUUID(groupIDStr)
-	parsedUserID := model.ParseUUID(userID)
+	groupID, err := model.ParseUUID(groupIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "invalid group_id"})
+		return
+	}
+	parsedUserID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
 
 	ctx := context.Background()
 
@@ -669,7 +768,16 @@ func handleLeaveGroup(w http.ResponseWriter, r *http.Request) {
 func handleUpdateGroupSettings(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
 	groupIDStr := chi.URLParam(r, "id")
-	groupID := model.ParseUUID(groupIDStr)
+	groupID, err := model.ParseUUID(groupIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "invalid group_id"})
+		return
+	}
+	parsedUserID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
 
 	var req model.UpdateGroupSettingsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -681,9 +789,9 @@ func handleUpdateGroupSettings(w http.ResponseWriter, r *http.Request) {
 
 	// Verify admin
 	var role string
-	err := database.Pool.QueryRow(ctx,
+	err = database.Pool.QueryRow(ctx,
 		`SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2`,
-		groupID, model.ParseUUID(userID),
+		groupID, parsedUserID,
 	).Scan(&role)
 	if err != nil || role != "admin" {
 		writeError(w, http.StatusForbidden, &model.AppError{Code: "ADMIN_ONLY", Message: "only admins can update settings"})
@@ -788,7 +896,16 @@ func handleUpdateGroupSettings(w http.ResponseWriter, r *http.Request) {
 func handlePinMessage(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
 	groupIDStr := chi.URLParam(r, "id")
-	groupID := model.ParseUUID(groupIDStr)
+	groupID, err := model.ParseUUID(groupIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "invalid group_id"})
+		return
+	}
+	parsedUserID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
 
 	var req model.PinMessageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -800,9 +917,9 @@ func handlePinMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Verify admin
 	var role string
-	err := database.Pool.QueryRow(ctx,
+	err = database.Pool.QueryRow(ctx,
 		`SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2`,
-		groupID, model.ParseUUID(userID),
+		groupID, parsedUserID,
 	).Scan(&role)
 	if err != nil || role != "admin" {
 		writeError(w, http.StatusForbidden, &model.AppError{Code: "ADMIN_ONLY", Message: "only admins can pin messages"})
@@ -811,7 +928,7 @@ func handlePinMessage(w http.ResponseWriter, r *http.Request) {
 
 	_, err = database.Pool.Exec(ctx,
 		`INSERT INTO pinned_messages (group_id, message_id, pinned_by) VALUES ($1, $2, $3)`,
-		groupID, req.MessageID, model.ParseUUID(userID),
+		groupID, req.MessageID, parsedUserID,
 	)
 	if err != nil {
 		log.Printf("[groups] pin error: %v", err)
@@ -826,14 +943,23 @@ func handleUnpinMessage(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
 	groupIDStr := chi.URLParam(r, "id")
 	messageIDStr := chi.URLParam(r, "messageId")
-	groupID := model.ParseUUID(groupIDStr)
+	groupID, err := model.ParseUUID(groupIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "invalid group_id"})
+		return
+	}
+	parsedUserID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
 
 	ctx := context.Background()
 
 	var role string
-	err := database.Pool.QueryRow(ctx,
+	err = database.Pool.QueryRow(ctx,
 		`SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2`,
-		groupID, model.ParseUUID(userID),
+		groupID, parsedUserID,
 	).Scan(&role)
 	if err != nil || role != "admin" {
 		writeError(w, http.StatusForbidden, &model.AppError{Code: "ADMIN_ONLY", Message: "only admins can unpin messages"})

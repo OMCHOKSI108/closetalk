@@ -33,14 +33,13 @@ func (h *wsHub) run() {
 	ticker := time.NewTicker(30 * time.Second)
 	for range ticker.C {
 		h.mu.RLock()
+		var stale []*wsClient
 		for chatID, clients := range h.byChat {
 			for client := range clients {
 				select {
 				case client.send <- []byte(`{"type":"ping"}`):
 				default:
-					h.mu.RUnlock()
-					h.removeClient(client)
-					h.mu.RLock()
+					stale = append(stale, client)
 				}
 			}
 			if len(clients) == 0 {
@@ -48,6 +47,10 @@ func (h *wsHub) run() {
 			}
 		}
 		h.mu.RUnlock()
+
+		for _, client := range stale {
+			h.removeClient(client)
+		}
 	}
 }
 

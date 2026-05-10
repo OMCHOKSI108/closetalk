@@ -52,7 +52,7 @@ func (s *MemStore) GetMessage(ctx context.Context, messageID uuid.UUID) (*model.
 	return msg, nil
 }
 
-func (s *MemStore) GetMessages(ctx context.Context, chatID string, cursor time.Time, limit int) ([]*model.Message, error) {
+func (s *MemStore) GetMessages(ctx context.Context, chatID string, cursor time.Time, limit int) ([]*model.Message, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -67,11 +67,12 @@ func (s *MemStore) GetMessages(ctx context.Context, chatID string, cursor time.T
 		return result[i].CreatedAt.After(result[j].CreatedAt)
 	})
 
+	hasMore := len(result) > limit
 	if len(result) > limit {
 		result = result[:limit]
 	}
 
-	return result, nil
+	return result, hasMore, nil
 }
 
 func (s *MemStore) UpdateMessage(ctx context.Context, msg *model.Message) error {
