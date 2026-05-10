@@ -22,6 +22,7 @@ import (
 	"github.com/OMCHOKSI108/closetalk/internal/database"
 	"github.com/OMCHOKSI108/closetalk/internal/middleware"
 	"github.com/OMCHOKSI108/closetalk/internal/model"
+	"github.com/OMCHOKSI108/closetalk/internal/notifications"
 )
 
 var upgrader = websocket.Upgrader{
@@ -58,6 +59,8 @@ func main() {
 	} else {
 		defer database.CloseNeon()
 	}
+
+	notifications.Init()
 
 	r := chi.NewRouter()
 
@@ -253,6 +256,55 @@ func (c *wsClient) readPump() {
 	}
 }
 
+// ─── Username helpers ────────────────────────────────────────────────────────
+
+func getUsernames(ctx context.Context, userIDs []string) map[string]string {
+	result := map[string]string{}
+	if database.Pool == nil || len(userIDs) == 0 {
+		return result
+	}
+	seen := map[string]bool{}
+	for _, id := range userIDs {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		var username string
+		err := database.Pool.QueryRow(ctx, "SELECT username FROM users WHERE id = $1::uuid", id).Scan(&username)
+		if err == nil {
+			result[id] = username
+		}
+	}
+	return result
+}
+
+func sendPushNotifications(ctx context.Context, recipientIDs []string, senderName, content string) {
+	if database.Pool == nil || len(recipientIDs) == 0 {
+		return
+	}
+
+	preview := content
+	if len(preview) > 100 {
+		preview = preview[:100]
+	}
+
+	for _, uid := range recipientIDs {
+		rows, err := database.Pool.Query(ctx,
+			`SELECT token FROM notification_tokens WHERE user_id = $1::uuid`,
+			uid,
+		)
+		if err != nil {
+			continue
+		}
+		for rows.Next() {
+			var token string
+			rows.Scan(&token)
+			notifications.Send(ctx, token, senderName, preview, nil)
+		}
+		rows.Close()
+	}
+}
+
 // ─── REST Handlers ───────────────────────────────────────────────────────────
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -310,12 +362,16 @@ func handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Look up sender username
+	usernames := getUsernames(context.Background(), []string{userID})
+
 	// Broadcast via WebSocket to all devices in chat
 	wsPayload, _ := json.Marshal(model.WebSocketMessage{
 		Type: "message.new",
 		Payload: model.MessageResponse{
 			ID: msg.ID, ChatID: msg.ChatID, SenderID: msg.SenderID,
-			Content: msg.Content, ContentType: msg.ContentType,
+			SenderUsername: usernames[userID],
+			Content:        msg.Content, ContentType: msg.ContentType,
 			Status: msg.Status, CreatedAt: msg.CreatedAt,
 		},
 	})
@@ -325,9 +381,13 @@ func handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		hub.broadcastToUserDevices(recipientID, wsPayload, "")
 	}
 
+	// Send push notifications to recipients not currently connected
+	go sendPushNotifications(context.Background(), req.RecipientIDs, usernames[userID], req.Content)
+
 	writeJSON(w, http.StatusCreated, model.MessageResponse{
 		ID: msg.ID, ChatID: msg.ChatID, SenderID: msg.SenderID,
-		Content: msg.Content, ContentType: msg.ContentType,
+		SenderUsername: usernames[userID],
+		Content:        msg.Content, ContentType: msg.ContentType,
 		Status: msg.Status, CreatedAt: msg.CreatedAt,
 	})
 }
@@ -364,11 +424,19 @@ func handleGetMessages(w http.ResponseWriter, r *http.Request) {
 		HasMore:  hasMore,
 	}
 
+	// Batch-lookup sender usernames
+	senderIDs := make([]string, 0, len(messages))
+	for _, msg := range messages {
+		senderIDs = append(senderIDs, msg.SenderID)
+	}
+	usernames := getUsernames(context.Background(), senderIDs)
+
 	for _, msg := range messages {
 		reactions, _ := database.GlobalStore.GetReactions(context.Background(), msg.ID)
 		resp.Messages = append(resp.Messages, model.MessageResponse{
 			ID: msg.ID, ChatID: msg.ChatID, SenderID: msg.SenderID,
-			Content: msg.Content, ContentType: msg.ContentType,
+			SenderUsername: usernames[msg.SenderID],
+			Content:        msg.Content, ContentType: msg.ContentType,
 			MediaURL: msg.MediaURL, MediaID: msg.MediaID,
 			ReplyToID: msg.ReplyToID, Status: msg.Status,
 			ModerationStatus: msg.ModerationStatus,
@@ -752,11 +820,19 @@ func handleSyncMessages(w http.ResponseWriter, r *http.Request) {
 		HasMore:  len(allMessages) >= limit,
 	}
 
+	// Batch-lookup sender usernames
+	senderIDs := make([]string, 0, len(allMessages))
+	for _, msg := range allMessages {
+		senderIDs = append(senderIDs, msg.SenderID)
+	}
+	usernames := getUsernames(ctx, senderIDs)
+
 	for _, msg := range allMessages {
 		reactions, _ := database.GlobalStore.GetReactions(ctx, msg.ID)
 		resp.Messages = append(resp.Messages, model.MessageResponse{
 			ID: msg.ID, ChatID: msg.ChatID, SenderID: msg.SenderID,
-			Content: msg.Content, ContentType: msg.ContentType,
+			SenderUsername: usernames[msg.SenderID],
+			Content:        msg.Content, ContentType: msg.ContentType,
 			MediaURL: msg.MediaURL, MediaID: msg.MediaID,
 			ReplyToID: msg.ReplyToID, Status: msg.Status,
 			ModerationStatus: msg.ModerationStatus,

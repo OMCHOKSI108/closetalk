@@ -14,9 +14,9 @@ import 'screens/auth/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/onboarding/permissions_screen.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  NotificationService().initialize();
+  await NotificationService().initialize();
   runApp(const CloseTalkApp());
 }
 

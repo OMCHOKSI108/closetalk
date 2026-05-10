@@ -180,6 +180,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     return MessageBubble(
                       message: msg,
                       isMe: msg.senderId == userId,
+                      senderUsername: msg.senderUsername,
                       onEdit: msg.senderId == userId
                           ? () => _editMessage(msg)
                           : null,

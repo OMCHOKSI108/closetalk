@@ -2,6 +2,7 @@ class Message {
   final String id;
   final String chatId;
   final String senderId;
+  final String? senderUsername;
   final String content;
   final String contentType;
   final String? mediaUrl;
@@ -18,6 +19,7 @@ class Message {
     required this.id,
     required this.chatId,
     required this.senderId,
+    this.senderUsername,
     required this.content,
     this.contentType = 'text',
     this.mediaUrl,
@@ -36,6 +38,7 @@ class Message {
       id: json['id'] as String,
       chatId: json['chat_id'] as String,
       senderId: json['sender_id'] as String,
+      senderUsername: json['sender_username'] as String?,
       content: json['content'] as String,
       contentType: json['content_type'] as String? ?? 'text',
       mediaUrl: json['media_url'] as String?,
@@ -59,6 +62,7 @@ class Message {
         'id': id,
         'chat_id': chatId,
         'sender_id': senderId,
+        'sender_username': senderUsername,
         'content': content,
         'content_type': contentType,
         'media_url': mediaUrl,
@@ -76,6 +80,7 @@ class Message {
     String? id,
     String? chatId,
     String? senderId,
+    String? senderUsername,
     String? content,
     String? contentType,
     String? mediaUrl,
@@ -92,6 +97,7 @@ class Message {
       id: id ?? this.id,
       chatId: chatId ?? this.chatId,
       senderId: senderId ?? this.senderId,
+      senderUsername: senderUsername ?? this.senderUsername,
       content: content ?? this.content,
       contentType: contentType ?? this.contentType,
       mediaUrl: mediaUrl ?? this.mediaUrl,

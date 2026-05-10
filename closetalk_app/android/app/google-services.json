@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "170634944826",
+    "project_id": "closetalk-110d6",
+    "storage_bucket": "closetalk-110d6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:170634944826:android:88b21a9a65f8db934f3003",
+        "android_client_info": {
+          "package_name": "com.example.closetalk_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB7PoxojAC-E4rcIW6GLgiYR0kBQYH4gX0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
