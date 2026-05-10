@@ -54,6 +54,7 @@ class AuthProvider extends ChangeNotifier {
     required String email,
     required String password,
     required String displayName,
+    required String username,
   }) async {
     _status = AuthStatus.loading;
     _error = null;
@@ -69,6 +70,7 @@ class AuthProvider extends ChangeNotifier {
           'email': email,
           'password': password,
           'display_name': displayName,
+          'username': username,
         }));
         final resp = await req.close();
         final body = await resp.transform(utf8.decoder).join();
@@ -313,6 +315,101 @@ class AuthProvider extends ChangeNotifier {
         client.close();
       }
     } catch (_) {}
+  }
+
+  Future<Map<String, dynamic>> updateProfile({
+    String? displayName,
+    String? username,
+    String? bio,
+    String? avatarUrl,
+  }) async {
+    _error = null;
+    final body = <String, dynamic>{};
+    if (displayName != null) body['display_name'] = displayName;
+    if (username != null) body['username'] = username;
+    if (bio != null) body['bio'] = bio;
+    if (avatarUrl != null) body['avatar_url'] = avatarUrl;
+
+    try {
+      final client = HttpClient();
+      try {
+        final req = await client.putUrl(
+            Uri.parse('${ApiConfig.authBaseUrl}/auth/profile'));
+        req.headers.set('Content-Type', 'application/json');
+        req.headers.set('Authorization', 'Bearer $_token');
+        req.write(jsonEncode(body));
+        final resp = await req.close();
+        final responseBody = await resp.transform(utf8.decoder).join();
+
+        if (resp.statusCode == 200) {
+          final data = jsonDecode(responseBody) as Map<String, dynamic>;
+          _user = User.fromJson(data['user'] as Map<String, dynamic>);
+          await _saveSession();
+          notifyListeners();
+          return data;
+        } else {
+          final err = jsonDecode(responseBody) as Map<String, dynamic>;
+          _error = err['error'] as String? ?? 'Failed to update profile';
+          notifyListeners();
+          return err;
+        }
+      } finally {
+        client.close();
+      }
+    } catch (e) {
+      _error = 'Network error: $e';
+      notifyListeners();
+      return {'error': _error};
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> searchUsers(String query) async {
+    if (query.isEmpty) return [];
+    try {
+      final client = HttpClient();
+      try {
+        final req = await client.getUrl(
+            Uri.parse('${ApiConfig.authBaseUrl}/users/search?q=$query'));
+        req.headers.set('Authorization', 'Bearer $_token');
+        final resp = await req.close();
+        final body = await resp.transform(utf8.decoder).join();
+        if (resp.statusCode == 200) {
+          final data = jsonDecode(body) as Map<String, dynamic>;
+          return (data['users'] as List<dynamic>)
+              .cast<Map<String, dynamic>>();
+        }
+      } finally {
+        client.close();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  Future<bool> registerNotificationToken({
+    required String token,
+    required String platform,
+    String? deviceId,
+  }) async {
+    try {
+      final client = HttpClient();
+      try {
+        final req = await client.postUrl(Uri.parse(
+            '${ApiConfig.authBaseUrl}/devices/notification'));
+        req.headers.set('Content-Type', 'application/json');
+        req.headers.set('Authorization', 'Bearer $_token');
+        req.write(jsonEncode({
+          'token': token,
+          'platform': platform,
+          if (deviceId != null) 'device_id': deviceId,
+        }));
+        final resp = await req.close();
+        return resp.statusCode == 200;
+      } finally {
+        client.close();
+      }
+    } catch (_) {
+      return false;
+    }
   }
 
   void clearError() {

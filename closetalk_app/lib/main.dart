@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'providers/auth_provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/group_provider.dart';
@@ -7,12 +8,15 @@ import 'providers/bookmark_provider.dart';
 import 'services/auth_service.dart';
 import 'services/group_service.dart';
 import 'services/message_service.dart';
+import 'services/notification_service.dart';
 import 'services/api_config.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/onboarding/permissions_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  NotificationService().initialize();
   runApp(const CloseTalkApp());
 }
 
@@ -54,12 +58,41 @@ class CloseTalkApp extends StatelessWidget {
               colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
               useMaterial3: true,
             ),
-            home: auth.status == AuthStatus.authenticated
-                ? const HomeScreen()
-                : const LoginScreen(),
+            home: _buildHome(auth),
           );
         },
       ),
     );
+  }
+
+  Widget _buildHome(AuthProvider auth) {
+    if (auth.status == AuthStatus.uninitialized) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (auth.status == AuthStatus.authenticated) {
+      return FutureBuilder<bool>(
+        future: _hasGrantedPermissions(),
+        builder: (_, snapshot) {
+          if (!snapshot.hasData) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+          return snapshot.data == true
+              ? const HomeScreen()
+              : const PermissionsScreen();
+        },
+      );
+    }
+
+    return const LoginScreen();
+  }
+
+  Future<bool> _hasGrantedPermissions() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('permissions_granted') ?? false;
   }
 }

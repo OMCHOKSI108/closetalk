@@ -12,6 +12,7 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _nameController = TextEditingController();
+  final _usernameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
@@ -20,6 +21,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _usernameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmController.dispose();
@@ -27,6 +29,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Future<void> _register() async {
+    final username = _usernameController.text.trim();
+    if (username.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Username is required')),
+      );
+      return;
+    }
+    if (username.length < 3) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Username must be at least 3 characters')),
+      );
+      return;
+    }
+    if (!RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(username)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Username can only contain letters, numbers, and underscores')),
+      );
+      return;
+    }
     if (_passwordController.text != _confirmController.text) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Passwords do not match')),
@@ -39,6 +60,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       email: _emailController.text.trim(),
       password: _passwordController.text,
       displayName: _nameController.text.trim(),
+      username: username,
     );
 
     if (mounted && auth.status == AuthStatus.authenticated) {
@@ -108,6 +130,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.person),
                 ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _usernameController,
+                decoration: const InputDecoration(
+                  labelText: 'Username',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.alternate_email),
+                  helperText: 'Letters, numbers, and underscores',
+                ),
+                maxLength: 30,
               ),
               const SizedBox(height: 16),
               TextField(

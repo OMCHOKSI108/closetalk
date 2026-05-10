@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -147,14 +148,14 @@ func main() {
 			"service": "Closetalk",
 			"version": "1.0.0",
 			"endpoints": map[string]string{
-				"health":           "/health",
-				"auth_register":    "/auth/register",
-				"auth_login":       "/auth/login",
-				"auth_refresh":     "/auth/refresh",
-				"auth_recover":     "/auth/recover",
-				"messages":         "/messages/{chatId}",
-				"bookmarks":        "/bookmarks",
-				"websocket":        "/ws",
+				"health":        "/health",
+				"auth_register": "/auth/register",
+				"auth_login":    "/auth/login",
+				"auth_refresh":  "/auth/refresh",
+				"auth_recover":  "/auth/recover",
+				"messages":      "/messages/{chatId}",
+				"bookmarks":     "/bookmarks",
+				"websocket":     "/ws",
 			},
 			"documentation": "https://github.com/OMCHOKSI108/closetalk",
 		})
@@ -184,6 +185,7 @@ func main() {
 		r.Use(middleware.UserRateLimit)
 		r.Put("/auth/password", handleChangePassword)
 		r.Post("/auth/logout", handleLogout)
+		r.Put("/auth/profile", handleUpdateProfile)
 	})
 
 	// Device routes (JWT required)
@@ -193,6 +195,7 @@ func main() {
 		r.Get("/devices", handleListDevices)
 		r.Post("/devices/link", handleLinkDevice)
 		r.Post("/devices/revoke", handleRevokeDevice)
+		r.Post("/devices/notification", handleRegisterNotificationToken)
 	})
 
 	// Group routes (JWT required)
@@ -211,6 +214,13 @@ func main() {
 		r.Put("/groups/{id}/settings", handleUpdateGroupSettings)
 		r.Post("/groups/{id}/pin", handlePinMessage)
 		r.Delete("/groups/{id}/pin/{messageId}", handleUnpinMessage)
+	})
+
+	// User search (JWT required)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
+		r.Get("/users/search", handleUserSearch)
 	})
 
 	// Start server
@@ -267,13 +277,23 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Email == "" || req.Password == "" || req.DisplayName == "" {
-		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "email, password, and display_name are required"})
+	if req.Email == "" || req.Password == "" || req.DisplayName == "" || req.Username == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "email, password, display_name, and username are required"})
 		return
 	}
 
 	if len(req.Password) < 8 {
 		writeError(w, http.StatusBadRequest, &model.AppError{Code: "WEAK_PASSWORD", Message: "password must be at least 8 characters"})
+		return
+	}
+
+	if len(req.Username) < 3 || len(req.Username) > 30 {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "INVALID_USERNAME", Message: "username must be between 3 and 30 characters"})
+		return
+	}
+
+	if !regexp.MustCompile(`^[a-zA-Z0-9_]+$`).MatchString(req.Username) {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "INVALID_USERNAME", Message: "username can only contain letters, numbers, and underscores"})
 		return
 	}
 
@@ -284,6 +304,11 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)", req.Email).Scan(&exists)
 	if exists {
 		writeError(w, http.StatusConflict, model.ErrEmailTaken)
+		return
+	}
+	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)", req.Username).Scan(&exists)
+	if exists {
+		writeError(w, http.StatusConflict, &model.AppError{Code: "USERNAME_TAKEN", Message: "username is already taken"})
 		return
 	}
 
@@ -297,10 +322,10 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	// Insert user
 	var userID string
 	err = database.Pool.QueryRow(ctx,
-		`INSERT INTO users (email, display_name, password_hash)
-		 VALUES ($1, $2, $3)
+		`INSERT INTO users (email, display_name, username, password_hash)
+		 VALUES ($1, $2, $3, $4)
 		 RETURNING id`,
-		req.Email, req.DisplayName, hash,
+		req.Email, req.DisplayName, req.Username, hash,
 	).Scan(&userID)
 	if err != nil {
 		log.Printf("[register] insert error: %v", err)
@@ -340,7 +365,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		AccessToken:   accessToken,
 		RefreshToken:  refreshToken,
 		ExpiresIn:     900,
-		User:          model.UserResponse{ID: parsedID, Email: &req.Email, DisplayName: req.DisplayName},
+		User:          model.UserResponse{ID: parsedID, Email: &req.Email, Username: req.Username, DisplayName: req.DisplayName},
 		RecoveryCodes: codes,
 	})
 }
@@ -361,10 +386,10 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	var user model.User
 	err := database.Pool.QueryRow(ctx,
-		`SELECT id, email, display_name, avatar_url, bio, password_hash, is_admin, is_active, created_at
+		`SELECT id, email, display_name, username, avatar_url, bio, password_hash, is_admin, is_active, created_at
 		 FROM users WHERE email = $1 AND deleted_at IS NULL`,
 		req.Email,
-	).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.Bio,
+	).Scan(&user.ID, &user.Email, &user.DisplayName, &user.Username, &user.AvatarURL, &user.Bio,
 		&user.PasswordHash, &user.IsAdmin, &user.IsActive, &user.CreatedAt)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, model.ErrInvalidCredentials)
@@ -393,6 +418,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		User: model.UserResponse{
 			ID:          user.ID,
 			Email:       user.Email,
+			Username:    user.Username,
 			DisplayName: user.DisplayName,
 			AvatarURL:   user.AvatarURL,
 			Bio:         user.Bio,
@@ -464,10 +490,11 @@ func handleGoogleOAuth(w http.ResponseWriter, r *http.Request, idToken string) {
 			return
 		}
 
+		username := generateUsername(displayName)
 		_, err = database.Pool.Exec(ctx,
-			`INSERT INTO users (id, email, display_name, avatar_url, oauth_provider, is_admin, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, 'google', false, $5, $5)`,
-			parsedID, email, displayName, avatarURL, now,
+			`INSERT INTO users (id, email, display_name, username, avatar_url, oauth_provider, is_admin, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, 'google', false, $6, $6)`,
+			parsedID, email, displayName, username, avatarURL, now,
 		)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to create user"})
@@ -495,9 +522,9 @@ func handleGoogleOAuth(w http.ResponseWriter, r *http.Request, idToken string) {
 	// Fetch user for response
 	var user model.User
 	err = database.Pool.QueryRow(ctx,
-		`SELECT id, email, display_name, avatar_url, bio, is_admin, created_at FROM users WHERE id = $1`,
+		`SELECT id, email, display_name, username, avatar_url, bio, is_admin, created_at FROM users WHERE id = $1`,
 		parsedID,
-	).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.Bio, &user.IsAdmin, &user.CreatedAt)
+	).Scan(&user.ID, &user.Email, &user.DisplayName, &user.Username, &user.AvatarURL, &user.Bio, &user.IsAdmin, &user.CreatedAt)
 
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to fetch user"})
@@ -511,6 +538,7 @@ func handleGoogleOAuth(w http.ResponseWriter, r *http.Request, idToken string) {
 		User: model.UserResponse{
 			ID:          user.ID,
 			Email:       ptr(email),
+			Username:    user.Username,
 			DisplayName: user.DisplayName,
 			AvatarURL:   user.AvatarURL,
 			Bio:         user.Bio,
@@ -732,12 +760,13 @@ func handleGitHubOAuth(w http.ResponseWriter, r *http.Request, code string) {
 	).Scan(&userID)
 
 	if err != nil {
+		username := generateUsername(displayName)
 		userID = uuid.New().String()
 		now := time.Now()
 		_, err = database.Pool.Exec(ctx,
-			`INSERT INTO users (id, email, display_name, avatar_url, oauth_provider, is_admin, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, 'github', false, $5, $5)`,
-			model.ParseUUIDOrNil(userID), email, displayName, ghUser.AvatarURL, now,
+			`INSERT INTO users (id, email, display_name, username, avatar_url, oauth_provider, is_admin, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, 'github', false, $6, $6)`,
+			model.ParseUUIDOrNil(userID), email, displayName, username, ghUser.AvatarURL, now,
 		)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to create user"})
@@ -761,11 +790,11 @@ func handleGitHubOAuth(w http.ResponseWriter, r *http.Request, code string) {
 
 	var user model.User
 	err = database.Pool.QueryRow(ctx,
-		`SELECT id, email, display_name, avatar_url, bio, is_admin, created_at FROM users WHERE id = $1`,
+		`SELECT id, email, display_name, username, avatar_url, bio, is_admin, created_at FROM users WHERE id = $1`,
 		userID,
-	).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.Bio, &user.IsAdmin, &user.CreatedAt)
+	).Scan(&user.ID, &user.Email, &user.DisplayName, &user.Username, &user.AvatarURL, &user.Bio, &user.IsAdmin, &user.CreatedAt)
 	if err != nil {
-		user = model.User{ID: parsedID, DisplayName: displayName, CreatedAt: time.Now()}
+		user = model.User{ID: parsedID, Username: displayName, DisplayName: displayName, CreatedAt: time.Now()}
 	}
 
 	writeJSON(w, http.StatusOK, model.AuthResponse{
@@ -775,6 +804,7 @@ func handleGitHubOAuth(w http.ResponseWriter, r *http.Request, code string) {
 		User: model.UserResponse{
 			ID:          user.ID,
 			Email:       ptr(email),
+			Username:    user.Username,
 			DisplayName: user.DisplayName,
 			AvatarURL:   user.AvatarURL,
 			Bio:         user.Bio,
@@ -815,12 +845,13 @@ func handleAppleOAuth(w http.ResponseWriter, r *http.Request, idToken string) {
 	).Scan(&userID)
 
 	if err != nil {
+		username := generateUsername(displayName)
 		userID = uuid.New().String()
 		now := time.Now()
 		_, err = database.Pool.Exec(ctx,
-			`INSERT INTO users (id, email, display_name, oauth_provider, is_admin, created_at, updated_at)
-			 VALUES ($1, $2, $3, 'apple', false, $4, $4)`,
-			model.ParseUUIDOrNil(userID), email, displayName, now,
+			`INSERT INTO users (id, email, display_name, username, oauth_provider, is_admin, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, 'apple', false, $5, $5)`,
+			model.ParseUUIDOrNil(userID), email, displayName, username, now,
 		)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to create user"})
@@ -1353,6 +1384,260 @@ func handleLinkDevice(w http.ResponseWriter, r *http.Request) {
 		DeviceToken: deviceToken,
 		DeviceID:    deviceID,
 	})
+}
+
+func generateUsername(base string) string {
+	username := strings.ToLower(strings.ReplaceAll(base, " ", "_"))
+	username = regexp.MustCompile(`[^a-zA-Z0-9_]`).ReplaceAllString(username, "")
+	if len(username) < 3 {
+		username = "user"
+	}
+	if len(username) > 25 {
+		username = username[:25]
+	}
+
+	// Check uniqueness and append random suffix if needed
+	ctx := context.Background()
+	var exists bool
+	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)", username).Scan(&exists)
+	if exists {
+		suffix := fmt.Sprintf("_%d", time.Now().Unix()%100000)
+		if len(username)+len(suffix) > 30 {
+			username = username[:30-len(suffix)] + suffix
+		} else {
+			username = username + suffix
+		}
+	}
+	return username
+}
+
+func handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	var req model.UpdateProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, model.ErrInvalidRequest)
+		return
+	}
+
+	ctx := context.Background()
+	now := time.Now()
+
+	// Fetch current user
+	var currentUsername string
+	var currentChanges int
+	var changedAt *time.Time
+	err := database.Pool.QueryRow(ctx,
+		`SELECT username, username_changes, username_changed_at FROM users WHERE id = $1`,
+		userID,
+	).Scan(&currentUsername, &currentChanges, &changedAt)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "failed to fetch user"})
+		return
+	}
+
+	// Build update
+	updates := []string{}
+	args := []any{}
+	argIdx := 1
+
+	if req.Username != nil && *req.Username != currentUsername {
+		newUsername := strings.TrimSpace(*req.Username)
+		if len(newUsername) < 3 || len(newUsername) > 30 {
+			writeError(w, http.StatusBadRequest, &model.AppError{Code: "INVALID_USERNAME", Message: "username must be between 3 and 30 characters"})
+			return
+		}
+		if !regexp.MustCompile(`^[a-zA-Z0-9_]+$`).MatchString(newUsername) {
+			writeError(w, http.StatusBadRequest, &model.AppError{Code: "INVALID_USERNAME", Message: "username can only contain letters, numbers, and underscores"})
+			return
+		}
+
+		// Check 14-day cooldown
+		if changedAt != nil && time.Since(*changedAt) < 14*24*time.Hour {
+			nextChange := changedAt.Add(14 * 24 * time.Hour)
+			writeError(w, http.StatusTooManyRequests, &model.AppError{
+				Code:    "USERNAME_COOLDOWN",
+				Message: fmt.Sprintf("you can change your username again after %s", nextChange.Format(time.RFC3339)),
+			})
+			return
+		}
+
+		// Check 2-change limit
+		if currentChanges >= 2 {
+			writeError(w, http.StatusForbidden, &model.AppError{Code: "USERNAME_LIMIT", Message: "maximum 2 username changes allowed"})
+			return
+		}
+
+		// Check if username is taken
+		var exists bool
+		database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1 AND id != $2)", newUsername, userID).Scan(&exists)
+		if exists {
+			writeError(w, http.StatusConflict, &model.AppError{Code: "USERNAME_TAKEN", Message: "username is already taken"})
+			return
+		}
+
+		updates = append(updates, fmt.Sprintf("username = $%d", argIdx))
+		args = append(args, newUsername)
+		argIdx++
+		updates = append(updates, fmt.Sprintf("username_changes = $%d", argIdx))
+		args = append(args, currentChanges+1)
+		argIdx++
+		updates = append(updates, fmt.Sprintf("username_changed_at = $%d", argIdx))
+		args = append(args, now)
+		argIdx++
+	}
+
+	if req.DisplayName != nil {
+		updates = append(updates, fmt.Sprintf("display_name = $%d", argIdx))
+		args = append(args, *req.DisplayName)
+		argIdx++
+	}
+
+	if req.Bio != nil {
+		updates = append(updates, fmt.Sprintf("bio = $%d", argIdx))
+		args = append(args, *req.Bio)
+		argIdx++
+	}
+
+	if req.AvatarURL != nil {
+		updates = append(updates, fmt.Sprintf("avatar_url = $%d", argIdx))
+		args = append(args, *req.AvatarURL)
+		argIdx++
+	}
+
+	if len(updates) == 0 {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "no fields to update"})
+		return
+	}
+
+	updates = append(updates, fmt.Sprintf("updated_at = $%d", argIdx))
+	args = append(args, now)
+	argIdx++
+
+	args = append(args, userID)
+	query := fmt.Sprintf("UPDATE users SET %s WHERE id = $%d", strings.Join(updates, ", "), argIdx)
+
+	_, err = database.Pool.Exec(ctx, query, args...)
+	if err != nil {
+		log.Printf("[profile] update error: %v", err)
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to update profile"})
+		return
+	}
+
+	// Fetch updated user
+	var user model.User
+	err = database.Pool.QueryRow(ctx,
+		`SELECT id, email, display_name, username, avatar_url, bio, is_admin, username_changes, username_changed_at, created_at
+		 FROM users WHERE id = $1`, userID,
+	).Scan(&user.ID, &user.Email, &user.DisplayName, &user.Username, &user.AvatarURL, &user.Bio,
+		&user.IsAdmin, &user.UsernameChanges, &user.UsernameChangedAt, &user.CreatedAt)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to fetch updated user"})
+		return
+	}
+
+	remainingChanges := 2 - user.UsernameChanges
+	if remainingChanges < 0 {
+		remainingChanges = 0
+	}
+
+	var nextChangeAt *time.Time
+	if user.UsernameChangedAt != nil && remainingChanges > 0 {
+		nextAllowed := user.UsernameChangedAt.Add(14 * 24 * time.Hour)
+		if time.Now().Before(nextAllowed) {
+			nextChangeAt = &nextAllowed
+		}
+	}
+
+	writeJSON(w, http.StatusOK, model.UpdateProfileResponse{
+		User: model.UserResponse{
+			ID:                user.ID,
+			Email:             user.Email,
+			Username:          user.Username,
+			DisplayName:       user.DisplayName,
+			AvatarURL:         user.AvatarURL,
+			Bio:               user.Bio,
+			IsAdmin:           user.IsAdmin,
+			UsernameChanges:   user.UsernameChanges,
+			UsernameChangedAt: user.UsernameChangedAt,
+			CreatedAt:         user.CreatedAt,
+		},
+		RemainingChanges: remainingChanges,
+		NextChangeAt:     nextChangeAt,
+	})
+}
+
+func handleUserSearch(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		writeJSON(w, http.StatusOK, model.UserSearchResponse{Users: []model.UserResponse{}})
+		return
+	}
+
+	ctx := context.Background()
+	rows, err := database.Pool.Query(ctx,
+		`SELECT id, email, display_name, username, avatar_url, bio, is_admin, created_at
+		 FROM users
+		 WHERE (username ILIKE $1 OR display_name ILIKE $1)
+		 AND deleted_at IS NULL
+		 LIMIT 20`,
+		"%"+query+"%",
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "search failed"})
+		return
+	}
+	defer rows.Close()
+
+	users := []model.UserResponse{}
+	for rows.Next() {
+		var u model.UserResponse
+		rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Username, &u.AvatarURL, &u.Bio, &u.IsAdmin, &u.CreatedAt)
+		users = append(users, u)
+	}
+
+	writeJSON(w, http.StatusOK, model.UserSearchResponse{Users: users})
+}
+
+func handleRegisterNotificationToken(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	var req model.RegisterNotificationTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, model.ErrInvalidRequest)
+		return
+	}
+
+	if req.Token == "" || req.Platform == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "token and platform are required"})
+		return
+	}
+
+	ctx := context.Background()
+	if req.DeviceID != "" {
+		// Update existing device's push token
+		_, err := database.Pool.Exec(ctx,
+			`UPDATE user_devices SET push_token = $1, last_active = now()
+			 WHERE id = $2 AND user_id = $3`,
+			req.Token, req.DeviceID, userID,
+		)
+		if err != nil {
+			log.Printf("[notification] update device token error: %v", err)
+		}
+	} else {
+		// Store as a standalone notification token
+		_, err := database.Pool.Exec(ctx,
+			`INSERT INTO notification_tokens (user_id, token, platform)
+			 VALUES ($1, $2, $3)
+			 ON CONFLICT (token) DO UPDATE SET platform = $3, updated_at = now()`,
+			userID, req.Token, req.Platform,
+		)
+		if err != nil {
+			log.Printf("[notification] insert token error: %v", err)
+			writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to register token"})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "notification token registered"})
 }
 
 func handleRevokeDevice(w http.ResponseWriter, r *http.Request) {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import '../../providers/auth_provider.dart';
 import 'register_screen.dart';
 import '../home_screen.dart';
@@ -37,6 +38,134 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  void _forgotPassword() {
+    final inputCtl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Recover Password'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+                'Enter your email to receive recovery codes, or enter a recovery code directly.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: inputCtl,
+              decoration: const InputDecoration(
+                labelText: 'Email or recovery code',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final input = inputCtl.text.trim();
+              if (input.isEmpty) return;
+              final auth = context.read<AuthProvider>();
+              if (input.contains('@')) {
+                await auth.sendRecoveryEmail(input);
+                if (ctx.mounted) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text('Recovery email sent if account exists')),
+                  );
+                }
+              } else {
+                await auth.recoverWithCode(input);
+                if (mounted && auth.status == AuthStatus.authenticated) {
+                  Navigator.pop(ctx);
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(builder: (_) => const HomeScreen()),
+                  );
+                }
+              }
+            },
+            child: const Text('Submit'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _googleLogin() async {
+    try {
+      final googleSignIn = GoogleSignIn();
+      final account = await googleSignIn.signIn();
+      if (account == null) return;
+      final auth = await account.authentication;
+      if (auth.idToken == null) return;
+      await context.read<AuthProvider>().googleLogin(idToken: auth.idToken!);
+      if (mounted && context.read<AuthProvider>().status == AuthStatus.authenticated) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Google sign-in failed: $e')),
+        );
+      }
+    }
+  }
+
+  void _githubLogin() {
+    final codeCtl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('GitHub Login'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Paste the authorization code from GitHub to sign in.',
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: codeCtl,
+              decoration: const InputDecoration(
+                labelText: 'Authorization code',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final code = codeCtl.text.trim();
+              if (code.isEmpty) return;
+              Navigator.pop(ctx);
+              await context.read<AuthProvider>().githubLogin(code: code);
+              if (mounted && context.read<AuthProvider>().status == AuthStatus.authenticated) {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (_) => const HomeScreen()),
+                );
+              }
+            },
+            child: const Text('Sign in'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -59,8 +188,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 16),
                         child: Text(auth.error!,
-                            style:
-                                const TextStyle(color: Colors.red)),
+                            style: const TextStyle(color: Colors.red)),
                       );
                     }
                     return const SizedBox.shrink();
@@ -112,6 +240,47 @@ class _LoginScreenState extends State<LoginScreen> {
                             )
                           : const Text('Login',
                               style: TextStyle(fontSize: 16)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: _forgotPassword,
+                  child: const Text('Forgot password?'),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    const Expanded(child: Divider()),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text('or',
+                          style: TextStyle(color: Colors.grey[600])),
+                    ),
+                    const Expanded(child: Divider()),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _googleLogin,
+                    icon: const Icon(Icons.g_mobiledata, color: Colors.red),
+                    label: const Text('Continue with Google'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _githubLogin,
+                    icon: const Icon(Icons.code, color: Colors.black87),
+                    label: const Text('Continue with GitHub'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
                   ),
                 ),

@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
-import '../services/auth_service.dart';
 import 'auth/login_screen.dart';
 import 'chat/chat_list_screen.dart';
 import 'chat/group_list_screen.dart';
-import 'settings/device_management_screen.dart';
+import 'settings/settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -17,16 +16,14 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
 
+  final _screens = const [
+    ChatListScreen(),
+    GroupListScreen(),
+    SettingsScreen(),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    final authService = context.read<AuthService>();
-
-    final screens = <Widget>[
-      const ChatListScreen(),
-      const GroupListScreen(),
-      DeviceManagementScreen(authService: authService),
-    ];
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('CloseTalk'),
@@ -36,16 +33,17 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () async {
               await context.read<AuthProvider>().logout();
               if (context.mounted) {
-                Navigator.pushReplacement(
+                Navigator.pushAndRemoveUntil(
                   context,
                   MaterialPageRoute(builder: (_) => const LoginScreen()),
+                  (_) => false,
                 );
               }
             },
           ),
         ],
       ),
-      body: screens[_currentIndex],
+      body: _screens[_currentIndex],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (i) => setState(() => _currentIndex = i),

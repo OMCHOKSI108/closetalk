@@ -82,6 +82,11 @@ func RunMigrations() error {
 
 		`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_users_phone_hash ON users(phone_hash) WHERE phone_hash IS NOT NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username IS NOT NULL`,
+
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT UNIQUE`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS username_changes INT DEFAULT 0`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS username_changed_at TIMESTAMPTZ`,
 
 		`CREATE TABLE IF NOT EXISTS recovery_codes (
 			id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -109,6 +114,17 @@ func RunMigrations() error {
 		)`,
 
 		`CREATE INDEX IF NOT EXISTS idx_user_devices_user ON user_devices(user_id)`,
+
+		`CREATE TABLE IF NOT EXISTS notification_tokens (
+			id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			token           TEXT NOT NULL UNIQUE,
+			platform        TEXT NOT NULL CHECK (platform IN ('apns', 'fcm')),
+			created_at      TIMESTAMPTZ DEFAULT now(),
+			updated_at      TIMESTAMPTZ DEFAULT now()
+		)`,
+
+		`CREATE INDEX IF NOT EXISTS idx_notification_tokens_user ON notification_tokens(user_id)`,
 
 		`CREATE TABLE IF NOT EXISTS conversations (
 			id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

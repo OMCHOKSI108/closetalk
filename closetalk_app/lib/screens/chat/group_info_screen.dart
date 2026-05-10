@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/group.dart';
 import '../../services/group_service.dart';
+import 'add_members_screen.dart';
 
 class GroupInfoScreen extends StatelessWidget {
   final Group group;
@@ -21,7 +22,6 @@ class GroupInfoScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Group header
           CircleAvatar(
             radius: 40,
             child: Text(group.name[0].toUpperCase()),
@@ -39,16 +39,31 @@ class GroupInfoScreen extends StatelessWidget {
             ),
           const SizedBox(height: 16),
 
-          // Member count
           ListTile(
             leading: const Icon(Icons.people),
             title: Text('${group.memberCount} members'),
           ),
           if (isAdmin) ...[
             ListTile(
-              leading: const Icon(Icons.add),
+              leading: const Icon(Icons.person_add),
               title: const Text('Add members'),
-              onTap: () {},
+              onTap: () async {
+                final result = await Navigator.push<bool>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AddMembersScreen(
+                      groupService: groupService,
+                      groupId: group.id,
+                    ),
+                  ),
+                );
+                if (result == true && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text('Members added successfully')),
+                  );
+                }
+              },
             ),
             ListTile(
               leading: const Icon(Icons.link),
@@ -81,8 +96,26 @@ class GroupInfoScreen extends StatelessWidget {
               leading: const Icon(Icons.exit_to_app),
               title: const Text('Leave group'),
               onTap: () async {
-                await groupService.leaveGroup(group.id);
-                if (context.mounted) Navigator.of(context).pop(true);
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Leave group?'),
+                    content: const Text('This cannot be undone.'),
+                    actions: [
+                      TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancel')),
+                      TextButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text('Leave',
+                              style: TextStyle(color: Colors.red))),
+                    ],
+                  ),
+                );
+                if (confirm == true) {
+                  await groupService.leaveGroup(group.id);
+                  if (context.mounted) Navigator.of(context).pop(true);
+                }
               },
             ),
           ],
@@ -98,8 +131,25 @@ class GroupInfoScreen extends StatelessWidget {
                     ? PopupMenuButton<String>(
                         onSelected: (action) async {
                           if (action == 'remove') {
-                            await groupService.removeMember(
-                                group.id, m.userId);
+                            final confirm = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('Remove member?'),
+                                content: Text('Remove ${m.displayName}?'),
+                                actions: [
+                                  TextButton(
+                                      onPressed: () => Navigator.pop(ctx, false),
+                                      child: const Text('Cancel')),
+                                  TextButton(
+                                      onPressed: () => Navigator.pop(ctx, true),
+                                      child: const Text('Remove',
+                                          style: TextStyle(color: Colors.red))),
+                                ],
+                              ),
+                            );
+                            if (confirm == true) {
+                              await groupService.removeMember(group.id, m.userId);
+                            }
                           } else if (action == 'make_admin') {
                             await groupService.updateRole(
                                 group.id, m.userId, 'admin');
@@ -188,7 +238,6 @@ class _InviteLinkScreenState extends State<_InviteLinkScreen> {
                 const SizedBox(height: 8),
                 Text('Expires: ${_invite!.expiresAt}'),
                 const SizedBox(height: 16),
-                // TODO: QR code display
               ],
               ElevatedButton.icon(
                 onPressed: _isLoading ? null : _generate,

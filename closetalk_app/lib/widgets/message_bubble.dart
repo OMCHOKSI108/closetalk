@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/message.dart';
@@ -5,18 +6,84 @@ import '../models/message.dart';
 class MessageBubble extends StatelessWidget {
   final Message message;
   final bool isMe;
+  final String? senderUsername;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
   final void Function(String emoji)? onReact;
+  final VoidCallback? onPin;
 
   const MessageBubble({
     super.key,
     required this.message,
     required this.isMe,
+    this.senderUsername,
     this.onEdit,
     this.onDelete,
     this.onReact,
+    this.onPin,
   });
+
+  void _showEmojiPicker(BuildContext context) {
+    final emojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Add a reaction',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: emojis.map((e) {
+                final alreadyReacted =
+                    message.reactions.any((r) => r.emoji == e);
+                return GestureDetector(
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    onReact?.call(e);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: alreadyReacted
+                          ? Colors.blue[50]
+                          : Colors.grey[100],
+                      borderRadius: BorderRadius.circular(20),
+                      border: alreadyReacted
+                          ? Border.all(color: Colors.blue)
+                          : null,
+                    ),
+                    child: Text(e, style: const TextStyle(fontSize: 28)),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImageContent(String base64Str) {
+    try {
+      final bytes = base64Decode(base64Str);
+      return Image.memory(
+        bytes,
+        height: 150,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) =>
+            const Icon(Icons.broken_image, size: 50),
+      );
+    } catch (_) {
+      return const Icon(Icons.broken_image, size: 50);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -38,96 +105,144 @@ class MessageBubble extends StatelessWidget {
               child: Text('Replying...',
                   style: TextStyle(fontSize: 12, color: Colors.grey[600])),
             ),
-          Container(
-            constraints: BoxConstraints(
-              maxWidth: MediaQuery.of(context).size.width * 0.75,
-            ),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: isMe ? Colors.blue[100] : Colors.grey[100],
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(16),
-                topRight: const Radius.circular(16),
-                bottomLeft: Radius.circular(isMe ? 16 : 4),
-                bottomRight: Radius.circular(isMe ? 4 : 16),
+          InkWell(
+            onLongPress: onReact != null
+                ? () => _showEmojiPicker(context)
+                : null,
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.75,
+              ),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: isMe ? Colors.blue[100] : Colors.grey[100],
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(16),
+                  topRight: const Radius.circular(16),
+                  bottomLeft: Radius.circular(isMe ? 16 : 4),
+                  bottomRight: Radius.circular(isMe ? 4 : 16),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: alignment,
+                children: [
+                  if (!isMe && senderUsername != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 2),
+                      child: Text('@$senderUsername',
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.blue[700],
+                              fontWeight: FontWeight.w500)),
+                    ),
+                  if (message.contentType == 'text' ||
+                      message.contentType.isEmpty)
+                    Text(message.content,
+                        style: const TextStyle(fontSize: 15)),
+                  if (message.contentType == 'image' &&
+                      message.content.isNotEmpty)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: _buildImageContent(message.content),
+                    )
+                  else if (message.mediaUrl != null &&
+                      message.mediaUrl!.isNotEmpty)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(
+                        message.mediaUrl!,
+                        height: 150,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) =>
+                            const Icon(Icons.broken_image, size: 50),
+                      ),
+                    ),
+                  const SizedBox(height: 2),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(time,
+                          style: TextStyle(
+                              fontSize: 11, color: Colors.grey[600])),
+                      if (isMe) ...[
+                        const SizedBox(width: 4),
+                        Icon(
+                          message.status == 'sent'
+                              ? Icons.check
+                              : Icons.access_time,
+                          size: 14,
+                          color: Colors.grey[600],
+                        ),
+                      ],
+                    ],
+                  ),
+                  if (message.reactions.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Wrap(
+                        spacing: 2,
+                        children: message.reactions
+                            .map((r) => InkWell(
+                                  onTap: onReact != null
+                                      ? () => onReact!(r.emoji)
+                                      : null,
+                                  child: Chip(
+                                    materialTapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                    label: Text(r.emoji,
+                                        style: const TextStyle(
+                                            fontSize: 12)),
+                                    padding: EdgeInsets.zero,
+                                    visualDensity:
+                                        VisualDensity.compact,
+                                  ),
+                                ))
+                            .toList(),
+                      ),
+                    ),
+                ],
               ),
             ),
-            child: Column(
-              crossAxisAlignment: alignment,
-              children: [
-                if (message.contentType == 'text')
-                  Text(message.content,
-                      style: const TextStyle(fontSize: 15)),
-                if (message.mediaUrl != null)
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.network(
-                      message.mediaUrl!,
-                      height: 150,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
-                          const Icon(Icons.broken_image, size: 50),
-                    ),
-                  ),
-                const SizedBox(height: 2),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(time,
-                        style:
-                            TextStyle(fontSize: 11, color: Colors.grey[600])),
-                    if (isMe) ...[
-                      const SizedBox(width: 4),
-                      Icon(
-                        message.status == 'sent'
-                            ? Icons.check
-                            : Icons.access_time,
-                        size: 14,
-                        color: Colors.grey[600],
-                      ),
-                    ],
-                  ],
-                ),
-                if (message.reactions.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Wrap(
-                      spacing: 2,
-                      children: message.reactions
-                          .map((r) => Chip(
-                                materialTapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
-                                label: Text(r.emoji,
-                                    style:
-                                        const TextStyle(fontSize: 12)),
-                                padding: EdgeInsets.zero,
-                                visualDensity: VisualDensity.compact,
-                              ))
-                          .toList(),
-                    ),
-                  ),
-              ],
-            ),
           ),
-          if (isMe && (onEdit != null || onDelete != null))
-            PopupMenuButton<String>(
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-              onSelected: (value) {
-                if (value == 'edit') onEdit?.call();
-                if (value == 'delete') onDelete?.call();
-              },
-              itemBuilder: (_) => [
-                if (onEdit != null)
-                  const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                if (onDelete != null)
-                  const PopupMenuItem(
-                      value: 'delete', child: Text('Delete')),
-              ],
-              child: const Icon(Icons.more_horiz, size: 16),
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isMe && (onEdit != null || onDelete != null))
+                PopupMenuButton<String>(
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  onSelected: (value) {
+                    if (value == 'edit') onEdit?.call();
+                    if (value == 'delete') onDelete?.call();
+                    if (value == 'pin') onPin?.call();
+                  },
+                  itemBuilder: (_) => [
+                    if (onEdit != null)
+                      const PopupMenuItem(
+                          value: 'edit', child: Text('Edit')),
+                    if (onDelete != null)
+                      const PopupMenuItem(
+                          value: 'delete', child: Text('Delete')),
+                    if (onPin != null)
+                      const PopupMenuItem(
+                          value: 'pin', child: Text('Pin')),
+                  ],
+                  child: const Icon(Icons.more_horiz, size: 16),
+                ),
+              if (onReact != null)
+                IconButton(
+                  constraints: const BoxConstraints(
+                      minWidth: 24, minHeight: 24),
+                  padding: EdgeInsets.zero,
+                  icon: const Icon(Icons.emoji_emotions_outlined,
+                      size: 16, color: Colors.grey),
+                  onPressed: () => _showEmojiPicker(context),
+                ),
+            ],
+          ),
         ],
       ),
     );

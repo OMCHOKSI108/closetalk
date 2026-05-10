@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 
 class ChatInputBar extends StatefulWidget {
   final void Function(String text) onSend;
+  final VoidCallback? onAttach;
   final bool isLoading;
 
   const ChatInputBar({
     super.key,
     required this.onSend,
+    this.onAttach,
     this.isLoading = false,
   });
 
@@ -33,12 +35,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
       decoration: BoxDecoration(
         color: Theme.of(context).scaffoldBackgroundColor,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 4,
             offset: const Offset(0, -1),
           ),
@@ -47,6 +49,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
       child: SafeArea(
         child: Row(
           children: [
+            if (widget.onAttach != null)
+              IconButton(
+                icon: const Icon(Icons.attach_file, color: Colors.blue),
+                onPressed: widget.onAttach,
+              ),
             Expanded(
               child: TextField(
                 controller: _controller,
@@ -65,7 +72,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 ),
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 4),
             IconButton(
               icon: widget.isLoading
                   ? const SizedBox(
