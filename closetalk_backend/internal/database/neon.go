@@ -82,11 +82,12 @@ func RunMigrations() error {
 
 		`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_users_phone_hash ON users(phone_hash) WHERE phone_hash IS NOT NULL`,
-		`CREATE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username IS NOT NULL`,
 
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT UNIQUE`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS username_changes INT DEFAULT 0`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS username_changed_at TIMESTAMPTZ`,
+
+		`CREATE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username IS NOT NULL`,
 
 		`CREATE TABLE IF NOT EXISTS recovery_codes (
 			id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
