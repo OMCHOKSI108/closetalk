@@ -82,6 +82,65 @@ class StoryProvider extends ChangeNotifier {
     return false;
   }
 
+  Future<void> viewStory(String storyId) async {
+    try {
+      await http.post(
+        Uri.parse('${ApiConfig.authBaseUrl}/stories/$storyId/view'),
+        headers: ApiConfig.headers,
+      );
+    } catch (_) {}
+  }
+
+  Future<Map<String, dynamic>> getStoryViews(String storyId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.authBaseUrl}/stories/$storyId/views'),
+        headers: ApiConfig.headers,
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return {'views': <dynamic>[]};
+  }
+
+  Future<bool> replyToStory(String storyId, String content) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.authBaseUrl}/stories/$storyId/reply'),
+        headers: ApiConfig.headers,
+        body: jsonEncode({'content': content}),
+      );
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> muteUser(String userId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.authBaseUrl}/stories/mute/$userId'),
+        headers: ApiConfig.headers,
+      );
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> unmuteUser(String userId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.authBaseUrl}/stories/unmute/$userId'),
+        headers: ApiConfig.headers,
+      );
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
   void setStateLoading() {
     _isLoading = true;
     _error = null;

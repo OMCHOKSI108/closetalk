@@ -64,20 +64,6 @@ class _ContactDiscoveryScreenState extends State<ContactDiscoveryScreen> {
     return hashes;
   }
 
-  Future<void> _registerHashes(List<String> hashes) async {
-    final client = HttpClient();
-    try {
-      final req = await client.postUrl(
-        Uri.parse('${ApiConfig.authBaseUrl}/contacts/hashes'),
-      );
-      req.headers.set('Content-Type', 'application/json');
-      req.headers.set('Authorization', 'Bearer ${ApiConfig.token}');
-      req.write(jsonEncode({'hashes': hashes}));
-      await req.close();
-    } finally {
-      client.close();
-    }
-  }
 
   @override
   Widget build(BuildContext context) {

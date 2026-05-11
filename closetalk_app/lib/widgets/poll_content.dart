@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 class PollContent extends StatefulWidget {
   final String jsonContent;
   final String myUserId;
-  final void Function(String option) onVote;
+  final void Function(int optionIndex) onVote;
 
   const PollContent({
     super.key,
@@ -75,10 +75,11 @@ class _PollContentState extends State<PollContent> {
             final ratio = total > 0 ? votes / total : 0.0;
             final voted = _hasVoted(option);
 
+            final optIndex = _options.indexOf(option);
             return Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: InkWell(
-                onTap: _iVoted ? null : () => widget.onVote(option),
+                onTap: _iVoted ? null : () => widget.onVote(optIndex),
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
                   padding: const EdgeInsets.symmetric(

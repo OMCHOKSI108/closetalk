@@ -22,6 +22,7 @@ import '../../widgets/voice_recorder_sheet.dart';
 import '../../widgets/sticker_picker_sheet.dart';
 import '../../widgets/location_picker.dart';
 import '../../widgets/poll_creator_sheet.dart';
+import '../../providers/poll_provider.dart';
 import 'forward_to_screen.dart';
 import 'group_info_screen.dart';
 import 'call_screen.dart';
@@ -301,11 +302,26 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       context: context,
       isScrollControlled: true,
       builder: (_) => PollCreatorSheet(
-        onSend: (jsonContent) {
+        onSend: (jsonContent) async {
           Navigator.pop(context);
+          final poll = jsonDecode(jsonContent) as Map<String, dynamic>;
+          final question = poll['question'] as String;
+          final options = (poll['options'] as List).cast<String>();
+
+          final pp = context.read<PollProvider>();
+          final pollId = await pp.createPoll(
+            chatId: widget.chatId,
+            question: question,
+            options: options,
+          );
+
           context.read<ChatProvider>().sendMessage(
                 chatId: widget.chatId,
-                content: jsonContent,
+                content: jsonEncode({
+                  'poll_id': pollId,
+                  'question': question,
+                  'options': options,
+                }),
                 contentType: 'poll',
               );
         },
@@ -772,24 +788,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
-  void _voteInPoll(Message msg, String option) {
+  void _voteInPoll(Message msg, int optionIndex) {
     try {
       final poll = jsonDecode(msg.content) as Map<String, dynamic>;
-      final votes = poll['votes'] as Map<String, dynamic>;
-      final userId = context.read<AuthProvider>().user?.id ?? '';
+      final pollId = poll['poll_id'] as String?;
+      if (pollId == null) return;
 
-      for (final key in votes.keys) {
-        final voters = (votes[key] as List<dynamic>).cast<String>();
-        voters.remove(userId);
-        votes[key] = voters;
-      }
-
-      final voters = (votes[option] as List<dynamic>).cast<String>();
-      voters.add(userId);
-      votes[option] = voters;
-      poll['votes'] = votes;
-
-      context.read<ChatProvider>().editMessage(msg.id, jsonEncode(poll));
+      context.read<PollProvider>().votePoll(pollId, optionIndex);
     } catch (_) {}
   }
 

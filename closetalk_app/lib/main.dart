@@ -15,6 +15,7 @@ import 'providers/broadcast_provider.dart';
 import 'providers/channel_provider.dart';
 import 'providers/schedule_provider.dart';
 import 'providers/admin_provider.dart';
+import 'providers/poll_provider.dart';
 import 'services/auth_service.dart';
 import 'services/group_service.dart';
 import 'services/message_service.dart';
@@ -52,6 +53,7 @@ class CloseTalkApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ChannelProvider()),
         ChangeNotifierProvider(create: (_) => ScheduleProvider()),
         ChangeNotifierProvider(create: (_) => AdminProvider()),
+        ChangeNotifierProvider(create: (_) => PollProvider()),
         Provider(
           create: (_) => AuthService(
             baseUrl: ApiConfig.authBaseUrl,

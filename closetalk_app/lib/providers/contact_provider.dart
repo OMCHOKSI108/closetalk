@@ -304,6 +304,26 @@ class ContactProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<bool> registerPhoneHashes(List<String> hashes) async {
+    try {
+      final client = HttpClient();
+      try {
+        final req = await client.postUrl(
+          Uri.parse('${ApiConfig.authBaseUrl}/contacts/hashes'),
+        );
+        req.headers.set('Content-Type', 'application/json');
+        req.headers.set('Authorization', 'Bearer ${ApiConfig.token}');
+        req.write(jsonEncode({'hashes': hashes}));
+        final resp = await req.close();
+        return resp.statusCode == 200;
+      } finally {
+        client.close();
+      }
+    } catch (_) {
+      return false;
+    }
+  }
+
   void clearError() {
     _error = null;
     notifyListeners();

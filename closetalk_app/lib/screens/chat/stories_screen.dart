@@ -41,6 +41,7 @@ class _StoriesRowState extends State<StoriesRow> {
               padding: const EdgeInsets.only(right: 12),
               child: GestureDetector(
                 onTap: () => _openViewer(context, entry.key, userStories),
+                onLongPress: () => _muteUser(context, entry.key),
                 child: Column(
                   children: [
                     UserAvatar(
@@ -70,6 +71,36 @@ class _StoriesRowState extends State<StoriesRow> {
         ],
       ),
     );
+  }
+
+  Future<void> _muteUser(BuildContext context, String userId) async {
+    final sp = context.read<StoryProvider>();
+    final muted = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Mute Stories'),
+        content: const Text('Stop seeing stories from this user?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Mute'),
+          ),
+        ],
+      ),
+    );
+    if (muted == true) {
+      final ok = await sp.muteUser(userId);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ok ? 'Stories muted' : 'Failed to mute')),
+        );
+      }
+    }
   }
 
   void _openViewer(BuildContext context, String userId, List<Story> stories) {
@@ -178,12 +209,111 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   void initState() {
     super.initState();
     _pageCtl = PageController();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<StoryProvider>().viewStory(widget.stories.first.id);
+    });
   }
 
   @override
   void dispose() {
     _pageCtl.dispose();
     super.dispose();
+  }
+
+  void _onPageChanged(int i) {
+    setState(() => _currentIndex = i);
+    context.read<StoryProvider>().viewStory(widget.stories[i].id);
+  }
+
+  Future<void> _showViewers(String storyId) async {
+    final sp = context.read<StoryProvider>();
+    final data = await sp.getStoryViews(storyId);
+    final views = data['views'] as List<dynamic>;
+
+    if (!context.mounted) return;
+    showModalBottomSheet(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('${views.length} viewer${views.length == 1 ? '' : 's'}',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ),
+            if (views.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('No views yet'),
+              )
+            else
+              SizedBox(
+                height: 300,
+                child: ListView.builder(
+                  itemCount: views.length,
+                  itemBuilder: (_, i) {
+                    final v = views[i] as Map<String, dynamic>;
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: Colors.brown[100],
+                        child: Text(
+                          ((v['display_name'] as String?)?.isNotEmpty == true
+                                  ? v['display_name'] as String
+                                  : '?')
+                              .substring(0, 1)
+                              .toUpperCase(),
+                        ),
+                      ),
+                      title: Text(v['display_name'] as String? ?? ''),
+                      subtitle: Text('@${v['username'] as String? ?? ''}'),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _replyToStory(String storyId) async {
+    final controller = TextEditingController();
+    final replied = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Reply to Story'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            hintText: 'Send a direct message…',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Send'),
+          ),
+        ],
+      ),
+    );
+    if (replied != true) return;
+    final text = controller.text.trim();
+    if (text.isEmpty) return;
+    final ok = await context.read<StoryProvider>().replyToStory(storyId, text);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(ok ? 'Reply sent!' : 'Failed to send reply')),
+      );
+    }
   }
 
   @override
@@ -195,7 +325,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
         child: PageView.builder(
           controller: _pageCtl,
           itemCount: widget.stories.length,
-          onPageChanged: (i) => setState(() => _currentIndex = i),
+          onPageChanged: _onPageChanged,
           itemBuilder: (_, i) {
             final s = widget.stories[i];
             return Stack(
@@ -250,6 +380,18 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
                               fontWeight: FontWeight.bold,
                               fontSize: 14),
                         ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.visibility,
+                            color: Colors.white70),
+                        onPressed: () => _showViewers(s.id),
+                        tooltip: 'Viewers',
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.reply,
+                            color: Colors.white70),
+                        onPressed: () => _replyToStory(s.id),
+                        tooltip: 'Reply via DM',
                       ),
                       IconButton(
                         icon: const Icon(Icons.close,

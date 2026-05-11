@@ -14,7 +14,7 @@ class MessageBubble extends StatelessWidget {
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
   final void Function(String emoji)? onReact;
-  final void Function(String option)? onVote;
+  final void Function(int optionIndex)? onVote;
   final VoidCallback? onPin;
   final VoidCallback? onForward;
   final VoidCallback? onReply;
