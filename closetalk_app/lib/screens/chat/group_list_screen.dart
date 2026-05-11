@@ -5,6 +5,7 @@ import '../../providers/group_provider.dart';
 import '../../services/group_service.dart';
 import '../../services/api_config.dart';
 import '../chat/group_create_screen.dart';
+import '../chat/group_discover_screen.dart';
 import '../chat/group_info_screen.dart';
 
 class GroupListScreen extends StatefulWidget {
@@ -91,19 +92,41 @@ class _GroupListScreenState extends State<GroupListScreen> {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final created = await Navigator.push<bool>(
-            context,
-            MaterialPageRoute(
-              builder: (_) => GroupCreateScreen(
-                groupService: groupService,
-              ),
-            ),
-          );
-          if (created == true) _refresh();
-        },
-        child: const Icon(Icons.add),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          FloatingActionButton.small(
+            heroTag: 'discoverGroupsFab',
+            tooltip: 'Discover public groups',
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const GroupDiscoverScreen(),
+                ),
+              );
+              _refresh();
+            },
+            child: const Icon(Icons.explore),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton(
+            heroTag: 'createGroupFab',
+            onPressed: () async {
+              final created = await Navigator.push<bool>(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => GroupCreateScreen(
+                    groupService: groupService,
+                  ),
+                ),
+              );
+              if (created == true) _refresh();
+            },
+            child: const Icon(Icons.add),
+          ),
+        ],
       ),
     );
   }

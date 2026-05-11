@@ -118,6 +118,53 @@ class GroupProvider extends ChangeNotifier {
     return false;
   }
 
+  Future<List<DiscoverGroup>> discoverGroups({String query = ''}) async {
+    try {
+      final uri = Uri.parse('${ApiConfig.authBaseUrl}/groups/discover')
+          .replace(queryParameters: {
+        if (query.trim().isNotEmpty) 'q': query.trim(),
+      });
+      final response = await http.get(uri, headers: ApiConfig.headers);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return (data['groups'] as List<dynamic>?)
+                ?.map((g) => DiscoverGroup.fromJson(g as Map<String, dynamic>))
+                .toList() ??
+            const [];
+      }
+    } catch (_) {}
+    return const [];
+  }
+
+  Future<JoinResult> joinPublicGroup(String groupId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.authBaseUrl}/groups/join'),
+        headers: ApiConfig.headers,
+        body: jsonEncode({'group_id': groupId}),
+      );
+      if (response.statusCode == 200) {
+        await fetchGroups();
+        return const JoinResult(success: true);
+      }
+      String? message;
+      try {
+        final body = jsonDecode(response.body);
+        if (body is Map && body['message'] != null) {
+          message = body['message'].toString();
+        } else if (body is Map && body['error'] != null) {
+          message = body['error'].toString();
+        }
+      } catch (_) {}
+      return JoinResult(
+        success: false,
+        error: message ?? 'Could not join (HTTP ${response.statusCode})',
+      );
+    } catch (e) {
+      return JoinResult(success: false, error: 'Network error: $e');
+    }
+  }
+
   Future<void> addMembers(String groupId, List<String> userIds) async {
     try {
       await http.post(
@@ -193,3 +240,46 @@ class GroupProvider extends ChangeNotifier {
     notifyListeners();
   }
 }
+
+class DiscoverGroup {
+  final String id;
+  final String name;
+  final String description;
+  final String avatarUrl;
+  final int memberCount;
+  final int memberLimit;
+  final bool isMember;
+  final DateTime createdAt;
+
+  const DiscoverGroup({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.avatarUrl,
+    required this.memberCount,
+    required this.memberLimit,
+    required this.isMember,
+    required this.createdAt,
+  });
+
+  factory DiscoverGroup.fromJson(Map<String, dynamic> json) {
+    return DiscoverGroup(
+      id: json['id'] as String,
+      name: json['name'] as String? ?? '',
+      description: json['description'] as String? ?? '',
+      avatarUrl: json['avatar_url'] as String? ?? '',
+      memberCount: json['member_count'] as int? ?? 0,
+      memberLimit: json['member_limit'] as int? ?? 1000,
+      isMember: json['is_member'] as bool? ?? false,
+      createdAt: DateTime.tryParse(json['created_at'] as String? ?? '') ??
+          DateTime.now(),
+    );
+  }
+}
+
+class JoinResult {
+  final bool success;
+  final String? error;
+  const JoinResult({required this.success, this.error});
+}
+  

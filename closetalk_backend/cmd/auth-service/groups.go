@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/OMCHOKSI108/closetalk/internal/database"
 	"github.com/OMCHOKSI108/closetalk/internal/middleware"
@@ -388,21 +389,50 @@ func handleJoinGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Code == "" && req.GroupID == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "code or group_id is required"})
+		return
+	}
+
 	ctx := context.Background()
 
-	// Find group by invite code
+	// Resolve group: by invite code (always allowed) or by group_id (public groups only).
 	var groupID, convID uuid.UUID
 	var memberCount, memberLimit int
-	err = database.Pool.QueryRow(ctx,
-		`SELECT g.id, g.conversation_id,
-		        (SELECT COUNT(*) FROM group_members WHERE group_id = g.id),
-		        g.member_limit
-		 FROM groups g WHERE g.invite_code = $1`,
-		req.Code,
-	).Scan(&groupID, &convID, &memberCount, &memberLimit)
-	if err != nil {
-		writeError(w, http.StatusNotFound, &model.AppError{Code: "INVALID_INVITE", Message: "invalid invite code"})
-		return
+	var isPublic bool
+	if req.Code != "" {
+		err = database.Pool.QueryRow(ctx,
+			`SELECT g.id, g.conversation_id,
+			        (SELECT COUNT(*) FROM group_members WHERE group_id = g.id),
+			        g.member_limit, g.is_public
+			 FROM groups g WHERE g.invite_code = $1`,
+			req.Code,
+		).Scan(&groupID, &convID, &memberCount, &memberLimit, &isPublic)
+		if err != nil {
+			writeError(w, http.StatusNotFound, &model.AppError{Code: "INVALID_INVITE", Message: "invalid invite code"})
+			return
+		}
+	} else {
+		parsed, perr := model.ParseUUID(req.GroupID)
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "invalid group_id"})
+			return
+		}
+		err = database.Pool.QueryRow(ctx,
+			`SELECT g.id, g.conversation_id,
+			        (SELECT COUNT(*) FROM group_members WHERE group_id = g.id),
+			        g.member_limit, g.is_public
+			 FROM groups g WHERE g.id = $1`,
+			parsed,
+		).Scan(&groupID, &convID, &memberCount, &memberLimit, &isPublic)
+		if err != nil {
+			writeError(w, http.StatusNotFound, &model.AppError{Code: "NOT_FOUND", Message: "group not found"})
+			return
+		}
+		if !isPublic {
+			writeError(w, http.StatusForbidden, &model.AppError{Code: "PRIVATE_GROUP", Message: "this group is private; an invite code is required"})
+			return
+		}
 	}
 
 	if memberCount >= memberLimit {
@@ -853,7 +883,7 @@ func handleUpdateGroupSettings(w http.ResponseWriter, r *http.Request) {
 
 	colMap := map[string]*string{
 		"message_retention": req.MessageRetention,
-		"disappearing_msg": req.DisappearingMsg,
+		"disappearing_msg":  req.DisappearingMsg,
 	}
 
 	for k, v := range colMap {
@@ -978,4 +1008,76 @@ func handleUnpinMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "unpinned"})
 }
 
+// handleDiscoverGroups returns public groups, ranked by member count,
+// with a flag indicating whether the caller is already a member.
+func handleDiscoverGroups(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	parsedUserID, err := model.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"})
+		return
+	}
 
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+
+	ctx := context.Background()
+	var rows pgx.Rows
+	if q != "" {
+		rows, err = database.Pool.Query(ctx,
+			`SELECT g.id, g.name, g.description, g.avatar_url, g.member_limit, g.created_at,
+			        (SELECT COUNT(*) FROM group_members WHERE group_id = g.id AND left_at IS NULL) AS member_count,
+			        EXISTS(SELECT 1 FROM group_members WHERE group_id = g.id AND user_id = $1 AND left_at IS NULL) AS is_member
+			 FROM groups g
+			 WHERE g.is_public = true
+			   AND (g.name ILIKE $2 OR g.description ILIKE $2)
+			 ORDER BY member_count DESC, g.created_at DESC
+			 LIMIT $3`,
+			parsedUserID, "%"+q+"%", limit,
+		)
+	} else {
+		rows, err = database.Pool.Query(ctx,
+			`SELECT g.id, g.name, g.description, g.avatar_url, g.member_limit, g.created_at,
+			        (SELECT COUNT(*) FROM group_members WHERE group_id = g.id AND left_at IS NULL) AS member_count,
+			        EXISTS(SELECT 1 FROM group_members WHERE group_id = g.id AND user_id = $1 AND left_at IS NULL) AS is_member
+			 FROM groups g
+			 WHERE g.is_public = true
+			 ORDER BY member_count DESC, g.created_at DESC
+			 LIMIT $2`,
+			parsedUserID, limit,
+		)
+	}
+	if err != nil {
+		log.Printf("[groups] discover query error: %v", err)
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to load public groups"})
+		return
+	}
+	defer rows.Close()
+
+	type discoverItem struct {
+		ID          string    `json:"id"`
+		Name        string    `json:"name"`
+		Description string    `json:"description"`
+		AvatarURL   string    `json:"avatar_url"`
+		MemberLimit int       `json:"member_limit"`
+		MemberCount int       `json:"member_count"`
+		IsMember    bool      `json:"is_member"`
+		CreatedAt   time.Time `json:"created_at"`
+	}
+	items := []discoverItem{}
+	for rows.Next() {
+		var it discoverItem
+		if err := rows.Scan(&it.ID, &it.Name, &it.Description, &it.AvatarURL, &it.MemberLimit, &it.CreatedAt, &it.MemberCount, &it.IsMember); err != nil {
+			log.Printf("[groups] discover scan error: %v", err)
+			continue
+		}
+		items = append(items, it)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"groups": items})
+}

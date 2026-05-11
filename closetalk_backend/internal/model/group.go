@@ -7,20 +7,20 @@ import (
 )
 
 type Group struct {
-	ID                uuid.UUID  `json:"id"`
-	ConversationID    uuid.UUID  `json:"conversation_id"`
-	Name              string     `json:"name"`
-	Description       string     `json:"description"`
-	AvatarURL         string     `json:"avatar_url,omitempty"`
-	CreatedBy         uuid.UUID  `json:"created_by"`
-	IsPublic          bool       `json:"is_public"`
-	MemberLimit       int        `json:"member_limit"`
-	MessageRetention  string     `json:"message_retention"`
-	DisappearingMsg   string     `json:"disappearing_msg"`
-	InviteCode        *string    `json:"invite_code,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	MemberCount       int        `json:"member_count,omitempty"`
+	ID               uuid.UUID `json:"id"`
+	ConversationID   uuid.UUID `json:"conversation_id"`
+	Name             string    `json:"name"`
+	Description      string    `json:"description"`
+	AvatarURL        string    `json:"avatar_url,omitempty"`
+	CreatedBy        uuid.UUID `json:"created_by"`
+	IsPublic         bool      `json:"is_public"`
+	MemberLimit      int       `json:"member_limit"`
+	MessageRetention string    `json:"message_retention"`
+	DisappearingMsg  string    `json:"disappearing_msg"`
+	InviteCode       *string   `json:"invite_code,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	MemberCount      int       `json:"member_count,omitempty"`
 }
 
 type GroupMember struct {
@@ -33,14 +33,14 @@ type GroupMember struct {
 }
 
 type GroupInvite struct {
-	ID        uuid.UUID  `json:"id"`
-	GroupID   uuid.UUID  `json:"group_id"`
-	Code      string     `json:"code"`
-	CreatedBy uuid.UUID  `json:"created_by"`
-	ExpiresAt time.Time  `json:"expires_at"`
-	MaxUses   *int       `json:"max_uses,omitempty"`
-	UseCount  int        `json:"use_count"`
-	CreatedAt time.Time  `json:"created_at"`
+	ID        uuid.UUID `json:"id"`
+	GroupID   uuid.UUID `json:"group_id"`
+	Code      string    `json:"code"`
+	CreatedBy uuid.UUID `json:"created_by"`
+	ExpiresAt time.Time `json:"expires_at"`
+	MaxUses   *int      `json:"max_uses,omitempty"`
+	UseCount  int       `json:"use_count"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type PinnedMessage struct {
@@ -79,7 +79,8 @@ type UpdateRoleRequest struct {
 }
 
 type JoinGroupRequest struct {
-	Code string `json:"code"`
+	Code    string `json:"code,omitempty"`
+	GroupID string `json:"group_id,omitempty"`
 }
 
 type InviteResponse struct {
@@ -93,29 +94,29 @@ type PinMessageRequest struct {
 }
 
 type GroupResponse struct {
-	ID               uuid.UUID            `json:"id"`
-	Name             string               `json:"name"`
-	Description      string               `json:"description"`
-	AvatarURL        string               `json:"avatar_url,omitempty"`
-	CreatedBy        uuid.UUID            `json:"created_by"`
-	IsPublic         bool                 `json:"is_public"`
-	MemberLimit      int                  `json:"member_limit"`
-	MessageRetention string               `json:"message_retention"`
-	DisappearingMsg  string               `json:"disappearing_msg"`
-	InviteCode       *string              `json:"invite_code,omitempty"`
-	MemberCount      int                  `json:"member_count"`
-	Members          []GroupMemberResponse `json:"members,omitempty"`
+	ID               uuid.UUID               `json:"id"`
+	Name             string                  `json:"name"`
+	Description      string                  `json:"description"`
+	AvatarURL        string                  `json:"avatar_url,omitempty"`
+	CreatedBy        uuid.UUID               `json:"created_by"`
+	IsPublic         bool                    `json:"is_public"`
+	MemberLimit      int                     `json:"member_limit"`
+	MessageRetention string                  `json:"message_retention"`
+	DisappearingMsg  string                  `json:"disappearing_msg"`
+	InviteCode       *string                 `json:"invite_code,omitempty"`
+	MemberCount      int                     `json:"member_count"`
+	Members          []GroupMemberResponse   `json:"members,omitempty"`
 	PinnedMessages   []PinnedMessageResponse `json:"pinned_messages,omitempty"`
-	CreatedAt        time.Time            `json:"created_at"`
-	UpdatedAt        time.Time            `json:"updated_at"`
+	CreatedAt        time.Time               `json:"created_at"`
+	UpdatedAt        time.Time               `json:"updated_at"`
 }
 
 type GroupMemberResponse struct {
-	UserID    uuid.UUID `json:"user_id"`
-	DisplayName string  `json:"display_name"`
-	AvatarURL string    `json:"avatar_url,omitempty"`
-	Role      string    `json:"role"`
-	JoinedAt  time.Time `json:"joined_at"`
+	UserID      uuid.UUID `json:"user_id"`
+	DisplayName string    `json:"display_name"`
+	AvatarURL   string    `json:"avatar_url,omitempty"`
+	Role        string    `json:"role"`
+	JoinedAt    time.Time `json:"joined_at"`
 }
 
 type PinnedMessageResponse struct {

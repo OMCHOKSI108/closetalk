@@ -213,6 +213,7 @@ func main() {
 		r.Use(middleware.UserRateLimit)
 		r.Get("/groups", handleListGroups)
 		r.Post("/groups", handleCreateGroup)
+		r.Get("/groups/discover", handleDiscoverGroups)
 		r.Get("/groups/{id}", handleGetGroup)
 		r.Post("/groups/{id}/invite", handleGenerateInvite)
 		r.Post("/groups/join", handleJoinGroup)
