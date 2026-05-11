@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/contact_provider.dart';
 import '../../services/sync_service.dart';
+import 'stories_screen.dart';
 import '../../services/api_config.dart';
 import '../../widgets/user_avatar.dart';
 import 'chat_detail_screen.dart';
@@ -153,6 +154,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       children: [
         Column(
           children: [
+            const StoriesRow(),
             SizedBox(
               height: 40,
               child: ListView(

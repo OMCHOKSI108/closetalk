@@ -8,6 +8,7 @@ import 'providers/group_provider.dart';
 import 'providers/bookmark_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/call_provider.dart';
+import 'providers/story_provider.dart';
 import 'services/auth_service.dart';
 import 'services/group_service.dart';
 import 'services/message_service.dart';
@@ -38,6 +39,7 @@ class CloseTalkApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => BookmarkProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => CallProvider()),
+        ChangeNotifierProvider(create: (_) => StoryProvider()),
         Provider(
           create: (_) => AuthService(
             baseUrl: ApiConfig.authBaseUrl,

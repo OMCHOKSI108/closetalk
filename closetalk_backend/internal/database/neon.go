@@ -230,6 +230,18 @@ func RunMigrations() error {
 		`CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_contacts_contact ON contacts(contact_id)`,
 
+		`CREATE TABLE IF NOT EXISTS stories (
+			id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			content     TEXT NOT NULL DEFAULT '',
+			media_url   TEXT DEFAULT '',
+			media_type  TEXT DEFAULT 'text' CHECK (media_type IN ('text','image','video')),
+			created_at  TIMESTAMPTZ DEFAULT now(),
+			expires_at  TIMESTAMPTZ DEFAULT now() + interval '24 hours'
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_stories_user ON stories(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_stories_expires ON stories(expires_at)`,
+
 		`CREATE TABLE IF NOT EXISTS reports (
 			id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 			reporter_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

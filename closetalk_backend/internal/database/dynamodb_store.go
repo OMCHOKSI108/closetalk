@@ -727,6 +727,10 @@ func (s *DynamoDBStore) SearchMessages(ctx context.Context, chatID string, query
 	return matched, hasMore, nil
 }
 
+func (s *DynamoDBStore) ListFlaggedMessages(ctx context.Context, cursor time.Time, limit int) ([]*model.Message, bool, error) {
+	return []*model.Message{}, false, nil
+}
+
 func (s *DynamoDBStore) DeleteExpiredMessages(ctx context.Context) (int64, error) {
 	return 0, nil
 }

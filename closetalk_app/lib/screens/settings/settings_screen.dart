@@ -9,6 +9,7 @@ import 'device_management_screen.dart';
 import 'bookmark_list_screen.dart';
 import 'edit_profile_screen.dart';
 import 'notification_preferences_screen.dart';
+import 'moderation_screen.dart';
 import '../chat/join_group_screen.dart';
 import '../auth/login_screen.dart';
 
@@ -131,6 +132,17 @@ class SettingsScreen extends StatelessWidget {
                   MaterialPageRoute(
                       builder: (_) =>
                           const NotificationPreferencesScreen()),
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.flag),
+                title: const Text('Moderation'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const ModerationScreen()),
                 ),
               ),
               const Divider(height: 1),

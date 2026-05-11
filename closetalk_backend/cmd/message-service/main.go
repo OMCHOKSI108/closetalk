@@ -117,6 +117,9 @@ func main() {
 		r.Post("/bookmarks", handleAddBookmark)
 		r.Delete("/bookmarks/{messageId}", handleRemoveBookmark)
 		r.Get("/bookmarks", handleListBookmarks)
+
+		r.Get("/moderation/queue", handleModerationQueue)
+		r.Post("/moderation/{messageId}/review", handleModerationReview)
 	})
 
 	// Sync & device routes (JWT required)
@@ -1226,6 +1229,98 @@ func handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 		Statuses: statuses,
 		HasMore:  false,
 	})
+}
+
+func handleModerationQueue(w http.ResponseWriter, r *http.Request) {
+	cursor := time.Now()
+	if c := r.URL.Query().Get("cursor"); c != "" {
+		if t, err := time.Parse(time.RFC3339, c); err == nil {
+			cursor = t
+		}
+	}
+
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 50 {
+			limit = parsed
+		}
+	}
+
+	ctx := context.Background()
+	messages, hasMore, err := database.GlobalStore.ListFlaggedMessages(ctx, cursor, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to list flagged messages")
+		return
+	}
+
+	results := make([]model.MessageResponse, 0, len(messages))
+	for _, msg := range messages {
+		results = append(results, model.MessageResponse{
+			ID: msg.ID, ChatID: msg.ChatID, SenderID: msg.SenderID,
+			Content: msg.Content, ContentType: msg.ContentType,
+			MediaURL: msg.MediaURL, MediaID: msg.MediaID,
+			Status: msg.Status, CreatedAt: msg.CreatedAt,
+			ModerationStatus: msg.ModerationStatus,
+		})
+	}
+
+	var nextCursor string
+	if len(messages) > 0 {
+		nextCursor = messages[len(messages)-1].CreatedAt.Format(time.RFC3339)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"messages":    results,
+		"next_cursor": nextCursor,
+		"has_more":    hasMore,
+	})
+}
+
+func handleModerationReview(w http.ResponseWriter, r *http.Request) {
+	messageID := chi.URLParam(r, "messageId")
+	if messageID == "" {
+		writeError(w, http.StatusBadRequest, "VALIDATION", "message_id is required")
+		return
+	}
+
+	var req struct {
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+		return
+	}
+
+	if req.Action != "approve" && req.Action != "reject" {
+		writeError(w, http.StatusBadRequest, "VALIDATION", "action must be 'approve' or 'reject'")
+		return
+	}
+
+	id, err := uuid.Parse(messageID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION", "invalid message_id")
+		return
+	}
+
+	ctx := context.Background()
+	msg, err := database.GlobalStore.GetMessage(ctx, id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "message not found")
+		return
+	}
+
+	status := "approved"
+	if req.Action == "reject" {
+		status = "rejected"
+	}
+
+	msg.ModerationStatus = status
+	if err := database.GlobalStore.UpdateMessage(ctx, msg); err != nil {
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to update moderation status")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": status})
 }
 
 func parseDisappearDuration(s string) (time.Duration, error) {

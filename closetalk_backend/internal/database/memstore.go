@@ -241,6 +241,33 @@ func (s *MemStore) SearchMessages(ctx context.Context, chatID string, query stri
 	return result, hasMore, nil
 }
 
+func (s *MemStore) ListFlaggedMessages(ctx context.Context, cursor time.Time, limit int) ([]*model.Message, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var result []*model.Message
+	for _, msg := range s.messages {
+		if msg.ModerationStatus == "flagged" && msg.CreatedAt.Before(cursor) {
+			result = append(result, msg)
+		}
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].CreatedAt.After(result[j].CreatedAt)
+	})
+
+	hasMore := len(result) > limit
+	if len(result) > limit {
+		result = result[:limit]
+	}
+
+	if result == nil {
+		result = []*model.Message{}
+	}
+
+	return result, hasMore, nil
+}
+
 func (s *MemStore) DeleteExpiredMessages(ctx context.Context) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

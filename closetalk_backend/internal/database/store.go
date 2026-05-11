@@ -24,4 +24,5 @@ type MessageStore interface {
 	ListBookmarks(ctx context.Context, userID string, cursor time.Time, limit int) ([]model.BookmarkResponse, bool, error)
 	SearchMessages(ctx context.Context, chatID string, query string, cursor time.Time, limit int) ([]*model.Message, bool, error)
 	DeleteExpiredMessages(ctx context.Context) (int64, error)
+	ListFlaggedMessages(ctx context.Context, cursor time.Time, limit int) ([]*model.Message, bool, error)
 }

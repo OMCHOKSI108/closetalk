@@ -254,6 +254,15 @@ func main() {
 		r.Post("/conversations/direct", handleCreateDirectConversation)
 	})
 
+	// Story routes (JWT required)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
+		r.Post("/stories", handleCreateStory)
+		r.Get("/stories", handleListStories)
+		r.Delete("/stories/{id}", handleDeleteStory)
+	})
+
 	// Start server
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -2421,4 +2430,112 @@ func handleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, model.AvatarUploadResponse{AvatarURL: avatarURL})
+}
+
+// --- Stories ---
+
+func handleCreateStory(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+
+	var req struct {
+		Content   string `json:"content"`
+		MediaURL  string `json:"media_url"`
+		MediaType string `json:"media_type"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "INVALID_REQUEST", Message: "Invalid request body"})
+		return
+	}
+
+	if req.MediaType == "" {
+		req.MediaType = "text"
+	}
+	if req.MediaType != "text" && req.MediaType != "image" && req.MediaType != "video" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "Invalid media_type"})
+		return
+	}
+
+	ctx := context.Background()
+	var storyID string
+	err := database.Pool.QueryRow(ctx,
+		`INSERT INTO stories (user_id, content, media_url, media_type) VALUES ($1, $2, $3, $4) RETURNING id`,
+		userID, req.Content, req.MediaURL, req.MediaType,
+	).Scan(&storyID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "Failed to create story"})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]string{"id": storyID})
+}
+
+func handleListStories(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	ctx := context.Background()
+
+	rows, err := database.Pool.Query(ctx,
+		`SELECT s.id, s.user_id, u.display_name, u.username, u.avatar_url,
+		        s.content, s.media_url, s.media_type, s.created_at, s.expires_at
+		 FROM stories s
+		 JOIN users u ON u.id = s.user_id
+		 WHERE s.expires_at > now()
+		   AND (s.user_id = $1
+		     OR s.user_id IN (
+		       SELECT contact_id FROM contacts
+		       WHERE user_id = $1 AND status = 'accepted'
+		     ))
+		 ORDER BY s.user_id, s.created_at DESC`,
+		userID,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "Failed to list stories"})
+		return
+	}
+	defer rows.Close()
+
+	type StoryResponse struct {
+		ID          string    `json:"id"`
+		UserID      string    `json:"user_id"`
+		DisplayName string    `json:"display_name"`
+		Username    string    `json:"username"`
+		AvatarURL   string    `json:"avatar_url"`
+		Content     string    `json:"content"`
+		MediaURL    string    `json:"media_url"`
+		MediaType   string    `json:"media_type"`
+		CreatedAt   time.Time `json:"created_at"`
+		ExpiresAt   time.Time `json:"expires_at"`
+	}
+
+	var stories []StoryResponse
+	for rows.Next() {
+		var s StoryResponse
+		if err := rows.Scan(&s.ID, &s.UserID, &s.DisplayName, &s.Username, &s.AvatarURL,
+			&s.Content, &s.MediaURL, &s.MediaType, &s.CreatedAt, &s.ExpiresAt); err != nil {
+			continue
+		}
+		stories = append(stories, s)
+	}
+
+	if stories == nil {
+		stories = []StoryResponse{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"stories": stories})
+}
+
+func handleDeleteStory(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	storyID := chi.URLParam(r, "id")
+	ctx := context.Background()
+
+	tag, err := database.Pool.Exec(ctx,
+		`DELETE FROM stories WHERE id = $1 AND user_id = $2`,
+		storyID, userID,
+	)
+	if err != nil || tag.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, &model.AppError{Code: "NOT_FOUND", Message: "Story not found"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

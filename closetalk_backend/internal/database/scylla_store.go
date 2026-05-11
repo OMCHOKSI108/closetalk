@@ -245,6 +245,10 @@ func (s *ScyllaMessageStore) SearchMessages(ctx context.Context, chatID string, 
 	return matched, hasMore, nil
 }
 
+func (s *ScyllaMessageStore) ListFlaggedMessages(ctx context.Context, cursor time.Time, limit int) ([]*model.Message, bool, error) {
+	return []*model.Message{}, false, nil
+}
+
 func (s *ScyllaMessageStore) DeleteExpiredMessages(ctx context.Context) (int64, error) {
 	return 0, nil
 }
