@@ -1,5 +1,12 @@
+import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../providers/auth_provider.dart';
 import '../home_screen.dart';
 
@@ -44,29 +51,7 @@ class _OTPVerifyScreenState extends State<OTPVerifyScreen> {
       if (codes != null && codes.isNotEmpty && mounted) {
         await showDialog(
           context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Recovery Codes'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Save these codes. Each can be used once.'),
-                const SizedBox(height: 12),
-                ...codes.map((c) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Text(c,
-                          style: const TextStyle(
-                              fontFamily: 'monospace', fontSize: 14)),
-                    )),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('I Saved Them'),
-              ),
-            ],
-          ),
+          builder: (_) => _RecoveryCodesDialog(codes: codes),
         );
       }
       if (mounted) {
@@ -150,6 +135,97 @@ class _OTPVerifyScreenState extends State<OTPVerifyScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _RecoveryCodesDialog extends StatefulWidget {
+  final List<String> codes;
+  const _RecoveryCodesDialog({required this.codes});
+
+  @override
+  State<_RecoveryCodesDialog> createState() => _RecoveryCodesDialogState();
+}
+
+class _RecoveryCodesDialogState extends State<_RecoveryCodesDialog> {
+  final GlobalKey _captureKey = GlobalKey();
+  bool _saving = false;
+
+  Future<void> _downloadAsImage() async {
+    setState(() => _saving = true);
+    try {
+      final boundary = _captureKey.currentContext!.findRenderObject()
+          as RenderRepaintBoundary;
+      final ui.Image image = await boundary.toImage(pixelRatio: 3.0);
+      final ByteData? byteData =
+          await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) throw 'Failed to encode image';
+      final Uint8List pngBytes = byteData.buffer.asUint8List();
+
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/closetalk_recovery_codes.png');
+      await file.writeAsBytes(pngBytes);
+
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'image/png')],
+        subject: 'CloseTalk recovery codes',
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save image: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Recovery Codes'),
+      content: SingleChildScrollView(
+        child: RepaintBoundary(
+          key: _captureKey,
+          child: Container(
+            color: Theme.of(context).dialogTheme.backgroundColor ??
+                Theme.of(context).colorScheme.surface,
+            padding: const EdgeInsets.all(8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Save these codes. Each can be used once.'),
+                const SizedBox(height: 12),
+                ...widget.codes.map((c) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Text(c,
+                          style: const TextStyle(
+                              fontFamily: 'monospace', fontSize: 14)),
+                    )),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton.icon(
+          onPressed: _saving ? null : _downloadAsImage,
+          icon: _saving
+              ? const SizedBox(
+                  height: 16,
+                  width: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.download),
+          label: const Text('Download as Image'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('I Saved Them'),
+        ),
+      ],
     );
   }
 }
