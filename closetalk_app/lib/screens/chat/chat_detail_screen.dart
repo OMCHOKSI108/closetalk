@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
@@ -16,6 +15,7 @@ import '../../providers/e2ee_provider.dart';
 import '../../providers/contact_provider.dart';
 import '../../services/group_service.dart';
 import '../../services/api_config.dart';
+import '../../services/media_service.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/chat_input_bar.dart';
 import '../../widgets/voice_recorder_sheet.dart';
@@ -286,15 +286,31 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final file = await picker.pickImage(source: ImageSource.gallery);
     if (file == null) return;
 
-    final bytes = await File(file.path).readAsBytes();
-    final b64 = base64Encode(bytes);
+    final fileName = file.name.isNotEmpty ? file.name : 'image.jpg';
+    final ext = fileName.contains('.') ? fileName.split('.').last : 'jpg';
+    final mime = ext == 'png' ? 'image/png' : 'image/jpeg';
 
-    final chat = context.read<ChatProvider>();
-    await chat.sendMessage(
-      chatId: widget.chatId,
-      content: b64,
-      contentType: 'image',
+    final result = await MediaService.uploadFile(
+      filePath: file.path,
+      fileName: 'image_${DateTime.now().millisecondsSinceEpoch}.$ext',
+      contentType: mime,
+      folder: 'uploads/images',
     );
+
+    if (result.isSuccess && result.mediaUrl != null) {
+      context.read<ChatProvider>().sendMessage(
+            chatId: widget.chatId,
+            content: '[Image]',
+            contentType: 'image',
+            mediaUrl: result.mediaUrl,
+          );
+    } else {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload failed: ${result.error ?? "unknown error"}')),
+        );
+      }
+    }
   }
 
   void _createPoll() {
@@ -772,6 +788,19 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 .sendMessage(
                   chatId: widget.chatId,
                   content: text,
+                  replyToId: _replyToMessageId,
+                );
+            _cancelReply();
+            _typingDebounce?.cancel();
+            context.read<ChatProvider>().sendTyping(widget.chatId, false);
+          },
+          onSendFormatted: (text) {
+            context
+                .read<ChatProvider>()
+                .sendMessage(
+                  chatId: widget.chatId,
+                  content: text,
+                  contentType: 'formatted',
                   replyToId: _replyToMessageId,
                 );
             _cancelReply();

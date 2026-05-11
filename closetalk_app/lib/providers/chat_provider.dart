@@ -270,6 +270,36 @@ class ChatProvider extends ChangeNotifier {
     return SearchMessagesResponse(results: []);
   }
 
+  Future<SearchMessagesResponse> searchMessagesGlobal(
+    String query, {
+    String? cursor,
+  }) async {
+    if (query.trim().isEmpty) {
+      return SearchMessagesResponse(results: []);
+    }
+    try {
+      final params = <String, String>{
+        'q': query.trim(),
+        'limit': '20',
+      };
+      if (cursor != null) params['cursor'] = cursor;
+
+      final uri = Uri.parse('${ApiConfig.baseUrl}/messages/search')
+          .replace(queryParameters: params);
+      final client = http.Client();
+      try {
+        final response = await client.get(uri, headers: ApiConfig.headers);
+        if (response.statusCode == 200) {
+          return SearchMessagesResponse.fromJson(
+              jsonDecode(response.body) as Map<String, dynamic>);
+        }
+      } finally {
+        client.close();
+      }
+    } catch (_) {}
+    return SearchMessagesResponse(results: []);
+  }
+
   Future<void> markDelivered(String messageId) async {
     try {
       final client = http.Client();

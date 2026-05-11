@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/contact_provider.dart';
 import '../../services/sync_service.dart';
@@ -21,12 +22,19 @@ class _ChatListScreenState extends State<ChatListScreen> {
   final List<_Conversation> _conversations = [];
   bool _isLoading = true;
   int _filterIndex = 0;
+  Set<String> _mutedChats = {};
+
+  Future<void> _loadMuted() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) setState(() => _mutedChats = (prefs.getStringList('muted_chats') ?? []).toSet());
+  }
 
   static const _filters = ['All', 'Unread', 'Personal', 'Groups'];
 
   @override
   void initState() {
     super.initState();
+    _loadMuted();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _load();
     });
@@ -193,6 +201,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                           final isPinned = context
                               .read<ChatProvider>()
                               .isChatPinned(conv.chatId);
+                          final isMuted = _mutedChats.contains(conv.chatId);
 
                           return ListTile(
                             leading: UserAvatar(
@@ -203,14 +212,22 @@ class _ChatListScreenState extends State<ChatListScreen> {
                             ),
                             title: Row(
                               children: [
-                                if (isPinned)
-                                  Padding(
-                                    padding:
-                                        const EdgeInsets.only(right: 4),
-                                    child: Icon(Icons.push_pin,
-                                        size: 14,
-                                        color: Colors.brown[400]),
-                                  ),
+                                  if (isPinned)
+                                    Padding(
+                                      padding:
+                                          const EdgeInsets.only(right: 4),
+                                      child: Icon(Icons.push_pin,
+                                          size: 14,
+                                          color: Colors.brown[400]),
+                                    ),
+                                  if (isMuted)
+                                    Padding(
+                                      padding:
+                                          const EdgeInsets.only(right: 4),
+                                      child: Icon(Icons.volume_off,
+                                          size: 14,
+                                          color: Colors.grey[400]),
+                                    ),
                                 Expanded(
                                   child: Text(title,
                                       style: const TextStyle(

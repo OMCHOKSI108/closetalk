@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:intl/intl.dart';
 import '../models/message.dart';
 import 'voice_message_content.dart';
@@ -243,6 +244,32 @@ class MessageBubble extends StatelessWidget {
                       message.contentType.isEmpty)
                     Text(message.content,
                         style: const TextStyle(fontSize: 15)),
+                  if (message.contentType == 'formatted')
+                    MarkdownBody(
+                      data: message.content,
+                      styleSheet: MarkdownStyleSheet(
+                        p: const TextStyle(fontSize: 15),
+                        strong: const TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.bold),
+                        code: TextStyle(
+                          fontSize: 13,
+                          backgroundColor: Colors.grey[200],
+                          fontFamily: 'monospace',
+                        ),
+                        codeblockDecoration: BoxDecoration(
+                          color: Colors.grey[100],
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        blockquoteDecoration: BoxDecoration(
+                          border: Border(
+                            left: BorderSide(
+                              color: Colors.grey[400]!,
+                              width: 3,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   if (message.contentType == 'e2ee')
                     Row(
                       mainAxisSize: MainAxisSize.min,

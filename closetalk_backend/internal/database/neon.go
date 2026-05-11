@@ -12,6 +12,89 @@ import (
 
 var Pool *pgxpool.Pool
 
+func IndexMessage(ctx context.Context, msgID, chatID, senderID, content, contentType string, createdAt time.Time) error {
+	if Pool == nil {
+		return nil
+	}
+	_, err := Pool.Exec(ctx,
+		`INSERT INTO message_search (message_id, chat_id, sender_id, content, content_type, created_at)
+		 VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6)
+		 ON CONFLICT (message_id) DO UPDATE SET content = $4, content_type = $5`,
+		msgID, chatID, senderID, content, contentType, createdAt,
+	)
+	return err
+}
+
+type NeonSearchResult struct {
+	MessageID   string    `json:"message_id"`
+	ChatID      string    `json:"chat_id"`
+	SenderID    string    `json:"sender_id"`
+	Content     string    `json:"content"`
+	ContentType string    `json:"content_type"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func SearchMessagesNeon(ctx context.Context, chatID string, query string, cursor time.Time, limit int) ([]NeonSearchResult, bool, error) {
+	if Pool == nil {
+		return nil, false, nil
+	}
+	likePattern := "%" + query + "%"
+	rows, err := Pool.Query(ctx,
+		`SELECT message_id::text, chat_id, sender_id::text, content, content_type, created_at
+		 FROM message_search
+		 WHERE chat_id = $1 AND content ILIKE $2 AND created_at < $3
+		 ORDER BY created_at DESC
+		 LIMIT $4`,
+		chatID, likePattern, cursor, limit,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("search neon: %w", err)
+	}
+	defer rows.Close()
+
+	var results []NeonSearchResult
+	for rows.Next() {
+		var r NeonSearchResult
+		if err := rows.Scan(&r.MessageID, &r.ChatID, &r.SenderID, &r.Content, &r.ContentType, &r.CreatedAt); err != nil {
+			continue
+		}
+		results = append(results, r)
+	}
+	hasMore := len(results) == limit
+	return results, hasMore, nil
+}
+
+func SearchMessagesNeonGlobal(ctx context.Context, userID string, query string, cursor time.Time, limit int) ([]NeonSearchResult, bool, error) {
+	if Pool == nil {
+		return nil, false, nil
+	}
+	likePattern := "%" + query + "%"
+	rows, err := Pool.Query(ctx,
+		`SELECT ms.message_id::text, ms.chat_id, ms.sender_id::text, ms.content, ms.content_type, ms.created_at
+		 FROM message_search ms
+		 JOIN conversation_participants cp ON cp.conversation_id = ms.chat_id
+		 WHERE cp.user_id = $1::uuid AND ms.content ILIKE $2 AND ms.created_at < $3
+		 ORDER BY ms.created_at DESC
+		 LIMIT $4`,
+		userID, likePattern, cursor, limit,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("search neon global: %w", err)
+	}
+	defer rows.Close()
+
+	var results []NeonSearchResult
+	for rows.Next() {
+		var r NeonSearchResult
+		if err := rows.Scan(&r.MessageID, &r.ChatID, &r.SenderID, &r.Content, &r.ContentType, &r.CreatedAt); err != nil {
+			continue
+		}
+		results = append(results, r)
+	}
+	hasMore := len(results) == limit
+	return results, hasMore, nil
+}
+
 func ConnectNeon() error {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -373,16 +456,23 @@ func RunMigrations() error {
 		`CREATE INDEX IF NOT EXISTS idx_mentions_user ON message_mentions(user_id)`,
 
 		`CREATE TABLE IF NOT EXISTS webhooks (
-			id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-			user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-			url         TEXT NOT NULL,
-			events      TEXT[] NOT NULL DEFAULT '{}',
-			is_active   BOOLEAN DEFAULT true,
-			secret      TEXT DEFAULT '',
-			created_at  TIMESTAMPTZ DEFAULT now(),
-			updated_at  TIMESTAMPTZ DEFAULT now()
+			id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			url             TEXT NOT NULL,
+			events          TEXT[] NOT NULL DEFAULT '{}',
+			is_active       BOOLEAN DEFAULT true,
+			secret          TEXT DEFAULT '',
+			last_success_at TIMESTAMPTZ,
+			last_failure_at TIMESTAMPTZ,
+			failure_count   INTEGER DEFAULT 0,
+			created_at      TIMESTAMPTZ DEFAULT now(),
+			updated_at      TIMESTAMPTZ DEFAULT now()
 		)`,
+		`ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMPTZ`,
+		`ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS last_failure_at TIMESTAMPTZ`,
+		`ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS failure_count INTEGER DEFAULT 0`,
 		`CREATE INDEX IF NOT EXISTS idx_webhooks_user ON webhooks(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_webhooks_active ON webhooks(is_active) WHERE is_active = true`,
 
 		`CREATE TABLE IF NOT EXISTS audit_log (
 			id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -396,6 +486,31 @@ func RunMigrations() error {
 		`CREATE INDEX IF NOT EXISTS idx_audit_log_admin ON audit_log(admin_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC)`,
+
+		`CREATE TABLE IF NOT EXISTS message_search (
+			id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			message_id  UUID NOT NULL UNIQUE,
+			chat_id     TEXT NOT NULL,
+			sender_id   UUID NOT NULL,
+			content     TEXT NOT NULL,
+			content_type TEXT NOT NULL DEFAULT 'text',
+			created_at  TIMESTAMPTZ NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_message_search_chat ON message_search(chat_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_message_search_content_gin ON message_search USING GIN(content gin_trgm_ops)`,
+		`CREATE INDEX IF NOT EXISTS idx_message_search_created ON message_search(created_at DESC)`,
+
+		`CREATE TABLE IF NOT EXISTS media (
+			id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			object_key  TEXT NOT NULL,
+			file_name   TEXT NOT NULL,
+			content_type TEXT NOT NULL,
+			file_size   BIGINT DEFAULT 0,
+			media_url   TEXT NOT NULL,
+			created_at  TIMESTAMPTZ DEFAULT now()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_media_user ON media(user_id)`,
 	}
 
 	for _, m := range migrations {

@@ -29,12 +29,26 @@ class _NotificationPreferencesScreenState
       _soundEnabled = prefs.getBool('notif_sound') ?? true;
       _vibrationEnabled = prefs.getBool('notif_vibrate') ?? true;
       _doNotDisturb = prefs.getBool('notif_dnd') ?? false;
+      final startH = prefs.getInt('quiet_start_hour') ?? 23;
+      final startM = prefs.getInt('quiet_start_minute') ?? 0;
+      final endH = prefs.getInt('quiet_end_hour') ?? 8;
+      final endM = prefs.getInt('quiet_end_minute') ?? 0;
+      _quietStart = TimeOfDay(hour: startH, minute: startM);
+      _quietEnd = TimeOfDay(hour: endH, minute: endM);
     });
   }
 
   Future<void> _save(String key, bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(key, value);
+  }
+
+  Future<void> _saveQuietHours() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('quiet_start_hour', _quietStart.hour);
+    await prefs.setInt('quiet_start_minute', _quietStart.minute);
+    await prefs.setInt('quiet_end_hour', _quietEnd.hour);
+    await prefs.setInt('quiet_end_minute', _quietEnd.minute);
   }
 
   @override
@@ -99,6 +113,7 @@ class _NotificationPreferencesScreenState
                       _quietStart = picked;
                       _quietEnd = pickedEnd;
                     });
+                    _saveQuietHours();
                   }
                 }
               },

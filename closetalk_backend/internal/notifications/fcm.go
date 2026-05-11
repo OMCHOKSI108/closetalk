@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"time"
 
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/messaging"
@@ -52,5 +53,37 @@ func Send(ctx context.Context, token, title, body string, data map[string]string
 	_, err := client.Send(ctx, msg)
 	if err != nil {
 		log.Printf("[notifications] send error: %v", err)
+	}
+}
+
+func SendWithRetry(ctx context.Context, token, title, body string, data map[string]string, maxRetries int) {
+	if client == nil {
+		return
+	}
+
+	baseDelay := 500 * time.Millisecond
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			delay := baseDelay * (1 << (attempt - 1))
+			log.Printf("[notifications] retry %d/%d after %v", attempt, maxRetries, delay)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
+			}
+		}
+		msg := &messaging.Message{
+			Token: token,
+			Notification: &messaging.Notification{
+				Title: title,
+				Body:  body,
+			},
+			Data: data,
+		}
+		_, err := client.Send(ctx, msg)
+		if err == nil {
+			return
+		}
+		log.Printf("[notifications] attempt %d error: %v", attempt+1, err)
 	}
 }

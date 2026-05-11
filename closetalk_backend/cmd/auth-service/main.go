@@ -36,6 +36,7 @@ import (
 
 	"github.com/OMCHOKSI108/closetalk/internal/auth"
 	"github.com/OMCHOKSI108/closetalk/internal/database"
+	"github.com/OMCHOKSI108/closetalk/internal/media"
 	"github.com/OMCHOKSI108/closetalk/internal/middleware"
 	"github.com/OMCHOKSI108/closetalk/internal/model"
 )
@@ -115,6 +116,8 @@ func main() {
 		log.Fatalf("[fatal] database: %v", err)
 	}
 	defer database.CloseNeon()
+
+	media.Init()
 
 	if err := database.ConnectValkey(); err != nil {
 		log.Fatalf("[fatal] valkey: %v", err)

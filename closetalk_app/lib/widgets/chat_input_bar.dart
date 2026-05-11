@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 class ChatInputBar extends StatefulWidget {
   final void Function(String text) onSend;
+  final void Function(String text)? onSendFormatted;
   final VoidCallback? onAttach;
   final VoidCallback? onRecord;
   final VoidCallback? onSticker;
@@ -16,6 +17,7 @@ class ChatInputBar extends StatefulWidget {
   const ChatInputBar({
     super.key,
     required this.onSend,
+    this.onSendFormatted,
     this.onAttach,
     this.onRecord,
     this.onSticker,
@@ -35,11 +37,16 @@ class _ChatInputBarState extends State<ChatInputBar> {
   final _controller = TextEditingController();
   Timer? _typingDebounce;
   bool _wasTyping = false;
+  bool _richTextMode = false;
 
   void _send() {
     final text = _controller.text.trim();
     if (text.isEmpty || widget.isLoading) return;
-    widget.onSend(text);
+    if (_richTextMode && widget.onSendFormatted != null) {
+      widget.onSendFormatted!(text);
+    } else {
+      widget.onSend(text);
+    }
     _controller.clear();
   }
 
@@ -144,6 +151,16 @@ class _ChatInputBarState extends State<ChatInputBar> {
                         color: Colors.purple),
                     onPressed: widget.onPoll,
                   ),
+                if (widget.onSendFormatted != null)
+                  IconButton(
+                    icon: Icon(
+                      _richTextMode ? Icons.format_bold : Icons.text_fields,
+                      color: _richTextMode ? Colors.orange : Colors.grey,
+                    ),
+                    onPressed: () =>
+                        setState(() => _richTextMode = !_richTextMode),
+                    tooltip: _richTextMode ? 'Plain text' : 'Rich text',
+                  ),
                 Expanded(
                   child: TextField(
                     controller: _controller,
@@ -164,6 +181,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   ),
                 ),
                 const SizedBox(width: 4),
+                if (_richTextMode)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: Icon(Icons.article,
+                        size: 16, color: Colors.orange[300]),
+                  ),
                 IconButton(
                   icon: widget.isLoading
                       ? const SizedBox(

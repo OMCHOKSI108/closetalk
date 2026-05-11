@@ -6,6 +6,8 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+typedef OnNotificationTap = void Function(String? chatId, String? messageId);
+
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   debugPrint('[notification] background: ${message.messageId}');
@@ -19,11 +21,14 @@ class NotificationService {
   bool _initialized = false;
   bool _firebaseAvailable = false;
   String? _fcmToken;
+  OnNotificationTap? _onTap;
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
 
   bool get isInitialized => _initialized;
   String? get fcmToken => _fcmToken;
+
+  void setOnTap(OnNotificationTap onTap) => _onTap = onTap;
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -37,6 +42,11 @@ class NotificationService {
       final messaging = FirebaseMessaging.instance;
       _fcmToken = await messaging.getToken();
       debugPrint('[notification] FCM token: $_fcmToken');
+
+      messaging.onTokenRefresh.listen((newToken) {
+        _fcmToken = newToken;
+        debugPrint('[notification] token refreshed: $newToken');
+      });
 
       FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
       FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
@@ -98,11 +108,41 @@ class NotificationService {
     return _fcmToken;
   }
 
+  Future<bool> _shouldSuppress(String? chatId) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final dnd = prefs.getBool('notif_dnd') ?? false;
+    if (dnd) {
+      final startH = prefs.getInt('quiet_start_hour') ?? 23;
+      final startM = prefs.getInt('quiet_start_minute') ?? 0;
+      final endH = prefs.getInt('quiet_end_hour') ?? 8;
+      final endM = prefs.getInt('quiet_end_minute') ?? 0;
+      final now = DateTime.now();
+      final startMin = startH * 60 + startM;
+      final endMin = endH * 60 + endM;
+      final nowMin = now.hour * 60 + now.minute;
+      if (startMin <= endMin) {
+        if (nowMin >= startMin && nowMin < endMin) return true;
+      } else {
+        if (nowMin >= startMin || nowMin < endMin) return true;
+      }
+    }
+
+    if (chatId != null) {
+      final muted = prefs.getStringList('muted_chats') ?? [];
+      if (muted.contains(chatId)) return true;
+    }
+
+    return false;
+  }
+
   Future<void> showLocalNotification({
     required String title,
     required String body,
     String? payload,
   }) async {
+    if (await _shouldSuppress(payload)) return;
+
     const androidDetails = AndroidNotificationDetails(
       'closetalk_messages',
       'Messages',
@@ -136,10 +176,12 @@ class NotificationService {
   }
 
   void _handleNotificationTap(RemoteMessage message) {
-    debugPrint('[notification] tapped: ${message.messageId}');
+    final chatId = message.data['chat_id'];
+    final messageId = message.data['message_id'];
+    _onTap?.call(chatId, messageId);
   }
 
   void _handleLocalNotificationTap(NotificationResponse response) {
-    debugPrint('[notification] local tap: ${response.payload}');
+    _onTap?.call(response.payload, null);
   }
 }

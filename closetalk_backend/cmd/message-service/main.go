@@ -24,9 +24,11 @@ import (
 
 	"github.com/OMCHOKSI108/closetalk/internal/auth"
 	"github.com/OMCHOKSI108/closetalk/internal/database"
+	"github.com/OMCHOKSI108/closetalk/internal/media"
 	"github.com/OMCHOKSI108/closetalk/internal/middleware"
 	"github.com/OMCHOKSI108/closetalk/internal/model"
 	"github.com/OMCHOKSI108/closetalk/internal/notifications"
+	"github.com/OMCHOKSI108/closetalk/internal/webhooks"
 )
 
 var upgrader = websocket.Upgrader{
@@ -65,6 +67,7 @@ func main() {
 	}
 
 	notifications.Init()
+	media.Init()
 
 	r := chi.NewRouter()
 
@@ -107,16 +110,20 @@ func main() {
 		r.Post("/messages/voice", handleUploadVoice)
 		r.Post("/messages/forward", handleForwardMessage)
 		r.Get("/messages/{chatId}", handleGetMessages)
+		r.Get("/messages/search", handleSearchMessagesGlobal)
 		r.Get("/messages/{chatId}/search", handleSearchMessages)
 		r.Put("/messages/{messageId}", handleEditMessage)
 		r.Delete("/messages/{messageId}", handleDeleteMessage)
 		r.Post("/messages/{messageId}/react", handleReactToMessage)
 		r.Post("/messages/{messageId}/read", handleMarkRead)
 		r.Post("/messages/{messageId}/delivered", handleMarkDelivered)
-
 		r.Post("/bookmarks", handleAddBookmark)
-		r.Delete("/bookmarks/{messageId}", handleRemoveBookmark)
 		r.Get("/bookmarks", handleListBookmarks)
+		r.Delete("/bookmarks/{messageId}", handleRemoveBookmark)
+
+		// Media upload (presigned URL)
+		r.Post("/media/upload", handleRequestMediaUpload)
+		r.Post("/media/upload-avatar", handleRequestAvatarUpload)
 
 		r.Get("/moderation/queue", handleModerationQueue)
 		r.Post("/moderation/{messageId}/review", handleModerationReview)
@@ -318,7 +325,7 @@ func getUsernames(ctx context.Context, userIDs []string) map[string]string {
 	return result
 }
 
-func sendPushNotifications(ctx context.Context, recipientIDs []string, senderName, content string) {
+func sendPushNotifications(ctx context.Context, recipientIDs []string, senderName, content, chatID, messageID, senderID string) {
 	if database.Pool == nil || len(recipientIDs) == 0 {
 		return
 	}
@@ -326,6 +333,13 @@ func sendPushNotifications(ctx context.Context, recipientIDs []string, senderNam
 	preview := content
 	if len(preview) > 100 {
 		preview = preview[:100]
+	}
+
+	data := map[string]string{
+		"chat_id":     chatID,
+		"message_id":  messageID,
+		"sender_id":   senderID,
+		"sender_name": senderName,
 	}
 
 	for _, uid := range recipientIDs {
@@ -339,7 +353,7 @@ func sendPushNotifications(ctx context.Context, recipientIDs []string, senderNam
 		for rows.Next() {
 			var token string
 			rows.Scan(&token)
-			notifications.Send(ctx, token, senderName, preview, nil)
+			go notifications.SendWithRetry(ctx, token, senderName, preview, data, 3)
 		}
 		rows.Close()
 	}
@@ -414,6 +428,16 @@ func handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Index in Neon for full-text search
+	go func() {
+		if err := database.IndexMessage(context.Background(),
+			msg.ID.String(), msg.ChatID, msg.SenderID,
+			msg.Content, msg.ContentType, msg.CreatedAt,
+		); err != nil {
+			log.Printf("[search] index error: %v", err)
+		}
+	}()
+
 	// Look up sender username
 	usernames := getUsernames(context.Background(), []string{userID})
 
@@ -436,7 +460,31 @@ func handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Send push notifications to recipients not currently connected
-	go sendPushNotifications(context.Background(), req.RecipientIDs, usernames[userID], req.Content)
+	go sendPushNotifications(context.Background(), req.RecipientIDs, usernames[userID], req.Content, msg.ChatID, msg.ID.String(), msg.SenderID)
+
+	// Dispatch webhooks for all recipients
+	go func() {
+		ctx := context.Background()
+		for _, recipientID := range req.RecipientIDs {
+			hooks, err := webhooks.LoadActiveWebhooks(ctx, recipientID)
+			if err != nil || len(hooks) == 0 {
+				continue
+			}
+			hookData := map[string]any{
+				"message_id":   msg.ID.String(),
+				"chat_id":      msg.ChatID,
+				"sender_id":    msg.SenderID,
+				"sender_name":  usernames[userID],
+				"content":      msg.Content,
+				"content_type": msg.ContentType,
+				"media_url":    msg.MediaURL,
+				"created_at":   msg.CreatedAt,
+			}
+			for _, h := range hooks {
+				go webhooks.DeliverWithRetry(ctx, h.ID, h.URL, h.Secret, webhooks.EventMessageNew, hookData, 3)
+			}
+		}
+	}()
 
 	writeJSON(w, http.StatusCreated, model.MessageResponse{
 		ID: msg.ID, ChatID: msg.ChatID, SenderID: msg.SenderID,
@@ -753,6 +801,39 @@ func handleMarkDelivered(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "delivered"})
 }
 
+func searchMessagesNeon(ctx context.Context, chatID, query string, cursor time.Time, limit int) ([]model.SearchResult, bool, error) {
+	neonResults, hasMore, err := database.SearchMessagesNeon(ctx, chatID, query, cursor, limit)
+	if err != nil || len(neonResults) > 0 {
+		if err != nil {
+			return nil, false, err
+		}
+		senderIDs := make([]string, 0, len(neonResults))
+		for _, r := range neonResults {
+			senderIDs = append(senderIDs, r.SenderID)
+		}
+		usernames := getUsernames(ctx, senderIDs)
+		results := make([]model.SearchResult, 0, len(neonResults))
+		for _, r := range neonResults {
+			snippet := r.Content
+			if len(snippet) > 150 {
+				snippet = snippet[:150] + "..."
+			}
+			results = append(results, model.SearchResult{
+				MessageID:   r.MessageID,
+				ChatID:      r.ChatID,
+				SenderID:    r.SenderID,
+				SenderName:  usernames[r.SenderID],
+				Content:     r.Content,
+				ContentType: r.ContentType,
+				Snippet:     snippet,
+				CreatedAt:   r.CreatedAt,
+			})
+		}
+		return results, hasMore, nil
+	}
+	return nil, false, nil
+}
+
 func handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	chatID := chi.URLParam(r, "chatId")
 	if chatID == "" {
@@ -781,6 +862,23 @@ func handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := context.Background()
+
+	// Try Neon full-text search first (ILIKE + pg_trgm)
+	results, hasMore, neonErr := searchMessagesNeon(ctx, chatID, query, cursor, limit)
+	if neonErr == nil && results != nil {
+		var nextCursor string
+		if len(results) > 0 {
+			nextCursor = results[len(results)-1].CreatedAt.Format(time.RFC3339)
+		}
+		writeJSON(w, http.StatusOK, model.SearchMessagesResponse{
+			Results:    results,
+			NextCursor: nextCursor,
+			HasMore:    hasMore,
+		})
+		return
+	}
+
+	// Fallback to store search
 	messages, hasMore, err := database.GlobalStore.SearchMessages(ctx, chatID, query, cursor, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to search messages")
@@ -793,7 +891,7 @@ func handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	usernames := getUsernames(ctx, senderIDs)
 
-	results := make([]model.SearchResult, 0, len(messages))
+	results = make([]model.SearchResult, 0, len(messages))
 	for _, msg := range messages {
 		snippet := msg.Content
 		if len(snippet) > 150 {
@@ -814,6 +912,76 @@ func handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	var nextCursor string
 	if len(messages) > 0 {
 		nextCursor = messages[len(messages)-1].CreatedAt.Format(time.RFC3339)
+	}
+
+	writeJSON(w, http.StatusOK, model.SearchMessagesResponse{
+		Results:    results,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	})
+}
+
+func handleSearchMessagesGlobal(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "AUTH", "unauthorized")
+		return
+	}
+
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		writeJSON(w, http.StatusOK, model.SearchMessagesResponse{Results: []model.SearchResult{}, HasMore: false})
+		return
+	}
+
+	cursor := time.Now()
+	if c := r.URL.Query().Get("cursor"); c != "" {
+		if t, err := time.Parse(time.RFC3339, c); err == nil {
+			cursor = t
+		}
+	}
+
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 50 {
+			limit = parsed
+		}
+	}
+
+	ctx := context.Background()
+	neonResults, hasMore, err := database.SearchMessagesNeonGlobal(ctx, userID, query, cursor, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to search messages")
+		return
+	}
+
+	senderIDs := make([]string, 0, len(neonResults))
+	for _, r := range neonResults {
+		senderIDs = append(senderIDs, r.SenderID)
+	}
+	usernames := getUsernames(ctx, senderIDs)
+
+	results := make([]model.SearchResult, 0, len(neonResults))
+	for _, r := range neonResults {
+		snippet := r.Content
+		if len(snippet) > 150 {
+			snippet = snippet[:150] + "..."
+		}
+		results = append(results, model.SearchResult{
+			MessageID:   r.MessageID,
+			ChatID:      r.ChatID,
+			SenderID:    r.SenderID,
+			SenderName:  usernames[r.SenderID],
+			Content:     r.Content,
+			ContentType: r.ContentType,
+			Snippet:     snippet,
+			CreatedAt:   r.CreatedAt,
+		})
+	}
+
+	var nextCursor string
+	if len(neonResults) > 0 {
+		nextCursor = neonResults[len(neonResults)-1].CreatedAt.Format(time.RFC3339)
 	}
 
 	writeJSON(w, http.StatusOK, model.SearchMessagesResponse{
@@ -1359,4 +1527,73 @@ func handleForceRevokeDevice(w http.ResponseWriter, r *http.Request) {
 	hub.disconnectDevice(userID, req.DeviceID)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
+}
+
+// ─── Media handlers ──────────────────────────────────────────────────────────
+
+func handleRequestMediaUpload(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+
+	var req struct {
+		FileName    string `json:"file_name"`
+		ContentType string `json:"content_type"`
+		Folder      string `json:"folder,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+		return
+	}
+
+	if req.FileName == "" {
+		writeError(w, http.StatusBadRequest, "VALIDATION", "file_name is required")
+		return
+	}
+
+	ctx := context.Background()
+	folder := req.Folder
+	if folder == "" {
+		folder = "uploads"
+	}
+
+	uploadURL, mediaURL, err := media.GenerateUploadURLWithFolder(ctx, folder, req.FileName, req.ContentType)
+	if err != nil {
+		log.Printf("[media] generate upload url error: %v", err)
+		writeError(w, http.StatusInternalServerError, "MEDIA_ERROR", "failed to generate upload URL")
+		return
+	}
+
+	if database.Pool != nil {
+		database.Pool.Exec(ctx,
+			`INSERT INTO media (user_id, object_key, file_name, content_type, media_url) VALUES ($1::uuid, $2, $3, $4, $5)`,
+			userID, folder+"/"+req.FileName, req.FileName, req.ContentType, mediaURL,
+		)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"upload_url": uploadURL,
+		"media_url":  mediaURL,
+	})
+}
+
+func handleRequestAvatarUpload(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+
+	uploadURL, mediaURL, err := media.GenerateUploadURLWithFolder(context.Background(), "avatars", "avatar.jpg", "image/jpeg")
+	if err != nil {
+		log.Printf("[media] avatar upload url error: %v", err)
+		writeError(w, http.StatusInternalServerError, "MEDIA_ERROR", "failed to generate upload URL")
+		return
+	}
+
+	if database.Pool != nil {
+		database.Pool.Exec(context.Background(),
+			`UPDATE users SET avatar_url = $2 WHERE id = $1::uuid`,
+			userID, mediaURL,
+		)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"upload_url": uploadURL,
+		"media_url":  mediaURL,
+	})
 }

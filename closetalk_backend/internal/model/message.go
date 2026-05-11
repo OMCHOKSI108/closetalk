@@ -13,7 +13,7 @@ type Message struct {
 	SenderDeviceID   string      `json:"sender_device_id,omitempty"`
 	RecipientIDs     []string    `json:"recipient_ids,omitempty"` // for multi-device fan-out
 	Content          string      `json:"content"`
-	ContentType      string      `json:"content_type"` // text | image | video | file | voice | poll
+	ContentType      string      `json:"content_type"` // text | image | video | file | voice | poll | formatted
 	MediaURL         string      `json:"media_url,omitempty"`
 	MediaID          string      `json:"media_id,omitempty"`
 	ReplyToID        *uuid.UUID  `json:"reply_to_id,omitempty"`
