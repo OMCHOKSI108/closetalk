@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import '../providers/contact_provider.dart';
 import '../services/auth_service.dart';
 import '../widgets/user_avatar.dart';
 import 'auth/login_screen.dart';
 import 'chat/chat_list_screen.dart';
+import 'chat/contact_requests_screen.dart';
 import 'chat/global_search_screen.dart';
 import 'chat/group_list_screen.dart';
 import 'chat/join_group_screen.dart';
@@ -31,6 +33,14 @@ class _HomeScreenState extends State<HomeScreen> {
   ];
 
   static const List<String> _titles = ['CloseTalk', 'Groups', 'Photos'];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<ContactProvider>().loadContacts();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -120,6 +130,24 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 );
               },
+            ),
+            Consumer<ContactProvider>(
+              builder: (_, cp, _) => ListTile(
+                leading: const Icon(Icons.person_add_alt_1_outlined),
+                title: const Text('Requests'),
+                trailing: cp.pendingRequests.isEmpty
+                    ? null
+                    : Badge.count(count: cp.pendingRequests.length),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const ContactRequestsScreen(),
+                    ),
+                  );
+                },
+              ),
             ),
             const Divider(),
             ListTile(

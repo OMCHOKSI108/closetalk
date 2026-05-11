@@ -26,9 +26,10 @@ class Contact {
   });
 
   factory Contact.fromJson(Map<String, dynamic> json) {
+    final contactId = json['contact_id'] as String? ?? json['id'] as String? ?? '';
     return Contact(
-      id: json['id'] as String? ?? '',
-      contactId: json['contact_id'] as String,
+      id: json['id'] as String? ?? contactId,
+      contactId: contactId,
       username: json['username'] as String? ?? '',
       displayName: json['display_name'] as String? ?? '',
       avatarUrl: json['avatar_url'] as String? ?? '',

@@ -2330,6 +2330,7 @@ func handleListContacts(w http.ResponseWriter, r *http.Request) {
 		var lastSeen *time.Time
 		rows.Scan(&c.ContactID, &c.Status, &c.ConversationID, &c.CreatedAt,
 			&c.Username, &c.DisplayName, &c.AvatarURL, &c.Bio, &lastSeen)
+		c.ID = c.ContactID
 		if lastSeen != nil {
 			c.LastSeen = lastSeen
 		}

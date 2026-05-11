@@ -131,7 +131,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   context,
                   MaterialPageRoute(
                     builder: (_) => AddMembersScreen(
-                            groupService: groupService,
+                      groupService: groupService,
                       groupId: group.id,
                     ),
                   ),
@@ -150,8 +150,10 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) =>
-                        _InviteLinkScreen(groupService: groupService, groupId: group.id),
+                    builder: (_) => _InviteLinkScreen(
+                      groupService: groupService,
+                      groupId: group.id,
+                    ),
                   ),
                 );
               },
@@ -241,7 +243,10 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                               ),
                             );
                             if (confirm == true) {
-                              await groupService.removeMember(group.id, m.userId);
+                              await groupService.removeMember(
+                                group.id,
+                                m.userId,
+                              );
                             }
                           } else if (action == 'make_admin') {
                             await groupService.updateRole(
