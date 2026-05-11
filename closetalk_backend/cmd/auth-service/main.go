@@ -271,6 +271,102 @@ func main() {
 		r.Get("/e2ee/keys/{userId}", handleGetE2EEKey)
 	})
 
+	// Account management (JWT required)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
+		r.Delete("/auth/account", handleDeleteAccount)
+	})
+
+	// Privacy settings (JWT required)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
+		r.Get("/users/settings", handleGetPrivacySettings)
+		r.Put("/users/settings", handleUpdatePrivacySettings)
+	})
+
+	// Contact discovery (JWT required)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
+		r.Post("/contacts/discover", handleContactDiscovery)
+		r.Post("/contacts/hashes", handleRegisterPhoneHashes)
+	})
+
+	// Story extensions (JWT required)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
+		r.Post("/stories/{id}/view", handleViewStory)
+		r.Get("/stories/{id}/views", handleGetStoryViews)
+		r.Post("/stories/{id}/reply", handleReplyToStory)
+		r.Post("/stories/mute/{userId}", handleMuteStoryUser)
+		r.Post("/stories/unmute/{userId}", handleUnmuteStoryUser)
+	})
+
+	// Broadcasts (JWT required)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
+		r.Post("/broadcasts", handleCreateBroadcast)
+		r.Get("/broadcasts", handleListBroadcasts)
+		r.Post("/broadcasts/{id}/send", handleSendBroadcast)
+	})
+
+	// Channels (JWT required)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
+		r.Post("/channels", handleCreateChannel)
+		r.Get("/channels", handleListChannels)
+		r.Get("/channels/discover", handleDiscoverChannels)
+		r.Post("/channels/{id}/subscribe", handleSubscribeChannel)
+		r.Post("/channels/{id}/unsubscribe", handleUnsubscribeChannel)
+		r.Get("/channels/{id}/subscribers", handleListChannelSubscribers)
+		r.Post("/channels/{id}/messages", handleSendChannelMessage)
+	})
+
+	// Scheduled messages (JWT required)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
+		r.Post("/messages/schedule", handleScheduleMessage)
+		r.Get("/messages/scheduled", handleListScheduledMessages)
+		r.Delete("/messages/scheduled/{id}", handleCancelScheduledMessage)
+	})
+
+	// Polls (JWT required)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
+		r.Post("/polls", handleCreatePoll)
+		r.Post("/polls/{id}/vote", handleVotePoll)
+		r.Get("/polls/{id}/results", handleGetPollResults)
+	})
+
+	// Admin routes (JWT + admin required)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+		r.Use(requireAdmin)
+		r.Use(middleware.UserRateLimit)
+		r.Get("/admin/users", handleAdminListUsers)
+		r.Put("/admin/users/{userId}/disable", handleAdminDisableUser)
+		r.Get("/admin/analytics", handleAdminGetAnalytics)
+		r.Get("/admin/flags", handleAdminListFlags)
+		r.Put("/admin/flags/{id}", handleAdminUpdateFlag)
+		r.Get("/admin/audit-log", handleAdminAuditLog)
+	})
+
+	// Webhooks (JWT required)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
+		r.Post("/webhooks", handleCreateWebhook)
+		r.Get("/webhooks", handleListWebhooks)
+		r.Delete("/webhooks/{id}", handleDeleteWebhook)
+	})
+
 	// Start server
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -301,6 +397,19 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	srv.Shutdown(ctx)
+}
+
+// --- Middleware --------------------------------------------------------------
+
+func requireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		isAdmin, ok := r.Context().Value(middleware.IsAdminKey).(bool)
+		if !ok || !isAdmin {
+			writeError(w, http.StatusForbidden, &model.AppError{Code: "FORBIDDEN", Message: "admin access required"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // --- Handlers ----------------------------------------------------------------

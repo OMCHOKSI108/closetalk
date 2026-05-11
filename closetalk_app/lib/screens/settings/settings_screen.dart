@@ -10,7 +10,12 @@ import 'bookmark_list_screen.dart';
 import 'edit_profile_screen.dart';
 import 'notification_preferences_screen.dart';
 import 'moderation_screen.dart';
+import 'privacy_settings_screen.dart';
 import '../chat/join_group_screen.dart';
+import '../chat/broadcast_list_screen.dart';
+import '../chat/channel_discover_screen.dart';
+import '../chat/scheduled_messages_screen.dart';
+import '../admin/admin_dashboard_screen.dart';
 import '../auth/login_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -124,6 +129,50 @@ class SettingsScreen extends StatelessWidget {
               ),
               const Divider(height: 1),
               ListTile(
+                leading: const Icon(Icons.lock),
+                title: const Text('Privacy & Security'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const PrivacySettingsScreen()),
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.campaign),
+                title: const Text('Broadcast Lists'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const BroadcastListScreen()),
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.forum),
+                title: const Text('Channels'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const ChannelDiscoverScreen()),
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.schedule),
+                title: const Text('Scheduled Messages'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const ScheduledMessagesScreen()),
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
                 leading: const Icon(Icons.notifications),
                 title: const Text('Notifications'),
                 trailing: const Icon(Icons.chevron_right),
@@ -145,6 +194,19 @@ class SettingsScreen extends StatelessWidget {
                       builder: (_) => const ModerationScreen()),
                 ),
               ),
+              if (auth.user?.isAdmin == true) ...[
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.admin_panel_settings),
+                  title: const Text('Admin Dashboard'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const AdminDashboardScreen()),
+                  ),
+                ),
+              ],
               const Divider(height: 1),
               Consumer<ThemeProvider>(
                 builder: (_, theme, __) => SwitchListTile(

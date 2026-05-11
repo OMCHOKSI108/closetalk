@@ -258,6 +258,144 @@ func RunMigrations() error {
 			created_at  TIMESTAMPTZ DEFAULT now(),
 			updated_at  TIMESTAMPTZ DEFAULT now()
 		)`,
+
+		`CREATE TABLE IF NOT EXISTS contact_hashes (
+			user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			phone_hash  TEXT NOT NULL,
+			created_at  TIMESTAMPTZ DEFAULT now(),
+			PRIMARY KEY (user_id, phone_hash)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_contact_hashes_hash ON contact_hashes(phone_hash)`,
+
+		`CREATE TABLE IF NOT EXISTS story_views (
+			story_id    UUID NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+			viewer_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			viewed_at   TIMESTAMPTZ DEFAULT now(),
+			PRIMARY KEY (story_id, viewer_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_story_views_story ON story_views(story_id)`,
+
+		`CREATE TABLE IF NOT EXISTS story_mutes (
+			user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			muted_user_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			muted_at        TIMESTAMPTZ DEFAULT now(),
+			PRIMARY KEY (user_id, muted_user_id)
+		)`,
+
+		`CREATE TABLE IF NOT EXISTS broadcasts (
+			id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			name        TEXT NOT NULL,
+			created_at  TIMESTAMPTZ DEFAULT now(),
+			updated_at  TIMESTAMPTZ DEFAULT now()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_broadcasts_user ON broadcasts(user_id)`,
+
+		`CREATE TABLE IF NOT EXISTS broadcast_members (
+			broadcast_id UUID NOT NULL REFERENCES broadcasts(id) ON DELETE CASCADE,
+			user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			added_at     TIMESTAMPTZ DEFAULT now(),
+			PRIMARY KEY (broadcast_id, user_id)
+		)`,
+
+		`CREATE TABLE IF NOT EXISTS channels (
+			id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			name            TEXT NOT NULL,
+			description     TEXT DEFAULT '',
+			avatar_url      TEXT DEFAULT '',
+			created_by      UUID NOT NULL REFERENCES users(id),
+			is_public       BOOLEAN DEFAULT true,
+			subscriber_count BIGINT DEFAULT 0,
+			created_at      TIMESTAMPTZ DEFAULT now(),
+			updated_at      TIMESTAMPTZ DEFAULT now()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_channels_public ON channels(is_public, created_at DESC)`,
+
+		`CREATE TABLE IF NOT EXISTS channel_subscribers (
+			channel_id    UUID NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+			user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			role          TEXT NOT NULL DEFAULT 'subscriber' CHECK (role IN ('admin', 'subscriber')),
+			subscribed_at TIMESTAMPTZ DEFAULT now(),
+			PRIMARY KEY (channel_id, user_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_channel_subs_user ON channel_subscribers(user_id)`,
+
+		`CREATE TABLE IF NOT EXISTS scheduled_messages (
+			id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			chat_id         TEXT NOT NULL,
+			sender_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			content         TEXT NOT NULL,
+			content_type    TEXT DEFAULT 'text',
+			media_url       TEXT DEFAULT '',
+			reply_to_id     UUID,
+			send_at         TIMESTAMPTZ NOT NULL,
+			status          TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'cancelled')),
+			created_at      TIMESTAMPTZ DEFAULT now()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_scheduled_send ON scheduled_messages(status, send_at) WHERE status = 'pending'`,
+
+		`CREATE TABLE IF NOT EXISTS polls (
+			id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			chat_id         TEXT NOT NULL,
+			creator_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			question        TEXT NOT NULL,
+			options         JSONB NOT NULL DEFAULT '[]',
+			multiple_choice BOOLEAN DEFAULT false,
+			is_closed       BOOLEAN DEFAULT false,
+			created_at      TIMESTAMPTZ DEFAULT now()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_polls_chat ON polls(chat_id)`,
+
+		`CREATE TABLE IF NOT EXISTS poll_votes (
+			poll_id       UUID NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+			user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			option_index  INT NOT NULL,
+			voted_at      TIMESTAMPTZ DEFAULT now(),
+			PRIMARY KEY (poll_id, user_id)
+		)`,
+
+		`CREATE TABLE IF NOT EXISTS feature_flags (
+			id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			name            TEXT NOT NULL UNIQUE,
+			description     TEXT DEFAULT '',
+			enabled         BOOLEAN DEFAULT false,
+			rollout_percent INT DEFAULT 100 CHECK (rollout_percent >= 0 AND rollout_percent <= 100),
+			created_at      TIMESTAMPTZ DEFAULT now(),
+			updated_at      TIMESTAMPTZ DEFAULT now()
+		)`,
+
+		`CREATE TABLE IF NOT EXISTS message_mentions (
+			message_id  TEXT NOT NULL,
+			user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			mentioned_at TIMESTAMPTZ DEFAULT now(),
+			PRIMARY KEY (message_id, user_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mentions_user ON message_mentions(user_id)`,
+
+		`CREATE TABLE IF NOT EXISTS webhooks (
+			id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			url         TEXT NOT NULL,
+			events      TEXT[] NOT NULL DEFAULT '{}',
+			is_active   BOOLEAN DEFAULT true,
+			secret      TEXT DEFAULT '',
+			created_at  TIMESTAMPTZ DEFAULT now(),
+			updated_at  TIMESTAMPTZ DEFAULT now()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_webhooks_user ON webhooks(user_id)`,
+
+		`CREATE TABLE IF NOT EXISTS audit_log (
+			id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			admin_id    UUID NOT NULL REFERENCES users(id),
+			action      TEXT NOT NULL,
+			target_type TEXT NOT NULL,
+			target_id   TEXT DEFAULT '',
+			details     JSONB DEFAULT '{}',
+			created_at  TIMESTAMPTZ DEFAULT now()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_log_admin ON audit_log(admin_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC)`,
 	}
 
 	for _, m := range migrations {
