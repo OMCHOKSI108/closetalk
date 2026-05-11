@@ -116,10 +116,43 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _initE2EE() async {
-    final e2ee = context.read<E2EEProvider>();
-    final contacts = context.read<ContactProvider>().contacts;
-    await e2ee.init();
-    if (e2ee.enabled) {
+    try {
+      final e2ee = context.read<E2EEProvider>();
+      final contacts = context.read<ContactProvider>().contacts;
+      await e2ee.init();
+      if (e2ee.enabled) {
+        String? peerId = widget.peerUserId;
+        if (peerId == null && widget.groupId == null) {
+          for (final c in contacts) {
+            if (c.conversationId == widget.chatId) {
+              peerId = c.contactId;
+              break;
+            }
+          }
+        }
+        if (peerId != null && !e2ee.hasSessionKey(widget.chatId)) {
+          await e2ee.getOrCreateSessionKey(peerId);
+        }
+        if (!mounted) return;
+        setState(() =>
+            _e2eeEnabled = e2ee.enabled && e2ee.hasSessionKey(widget.chatId));
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _enableE2EE() async {
+    try {
+      final e2ee = context.read<E2EEProvider>();
+      final contacts = context.read<ContactProvider>().contacts;
+      await e2ee.init();
+      final ok = await e2ee.enable();
+      if (!ok) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to enable E2EE')),
+        );
+        return;
+      }
       String? peerId = widget.peerUserId;
       if (peerId == null && widget.groupId == null) {
         for (final c in contacts) {
@@ -129,51 +162,27 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           }
         }
       }
-      if (peerId != null && !e2ee.hasSessionKey(widget.chatId)) {
-        await e2ee.getOrCreateSessionKey(peerId);
-      }
-      if (!mounted) return;
-      setState(
-          () => _e2eeEnabled = e2ee.enabled && e2ee.hasSessionKey(widget.chatId));
-    }
-  }
-
-  Future<void> _enableE2EE() async {
-    final e2ee = context.read<E2EEProvider>();
-    final contacts = context.read<ContactProvider>().contacts;
-    await e2ee.init();
-    final ok = await e2ee.enable();
-    if (!ok) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to enable E2EE')),
-      );
-      return;
-    }
-    String? peerId = widget.peerUserId;
-    if (peerId == null && widget.groupId == null) {
-      for (final c in contacts) {
-        if (c.conversationId == widget.chatId) {
-          peerId = c.contactId;
-          break;
+      if (peerId != null) {
+        final key = await e2ee.getOrCreateSessionKey(peerId);
+        if (key != null) {
+          if (!mounted) return;
+          setState(() => _e2eeEnabled = true);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('End-to-end encryption enabled')),
+          );
+          return;
         }
       }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Contact has not enabled E2EE yet')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not enable encryption')),
+      );
     }
-    if (peerId != null) {
-      final key = await e2ee.getOrCreateSessionKey(peerId);
-      if (key != null) {
-        if (!mounted) return;
-        setState(() => _e2eeEnabled = true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('End-to-end encryption enabled')),
-        );
-        return;
-      }
-    }
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Contact has not enabled E2EE yet')),
-    );
   }
 
   Future<void> _loadMuted() async {
@@ -191,6 +200,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       muted.add(widget.chatId);
     }
     await prefs.setStringList('muted_chats', muted);
+    if (!mounted) return;
     setState(() => _isMuted = !_isMuted);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -266,7 +276,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final chat = context.read<ChatProvider>();
     final messages = chat.getMessages(widget.chatId);
     final index = messages.indexWhere((m) => m.id == result.messageId);
-    if (index >= 0) {
+    if (index >= 0 && _scrollController.hasClients) {
       // ListView is reversed, so scroll to the calculated position
       final targetIndex = messages.length - 1 - index;
       _scrollController.animateTo(
@@ -289,35 +299,42 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _pickAndSendImage() async {
-    final picker = ImagePicker();
-    final file = await picker.pickImage(source: ImageSource.gallery);
-    if (file == null) return;
+    try {
+      final picker = ImagePicker();
+      final file = await picker.pickImage(source: ImageSource.gallery);
+      if (file == null) return;
 
-    final fileName = file.name.isNotEmpty ? file.name : 'image.jpg';
-    final ext = fileName.contains('.') ? fileName.split('.').last : 'jpg';
-    final mime = ext == 'png' ? 'image/png' : 'image/jpeg';
+      final fileName = file.name.isNotEmpty ? file.name : 'image.jpg';
+      final ext = fileName.contains('.') ? fileName.split('.').last : 'jpg';
+      final mime = ext == 'png' ? 'image/png' : 'image/jpeg';
 
-    final result = await MediaService.uploadFile(
-      filePath: file.path,
-      fileName: 'image_${DateTime.now().millisecondsSinceEpoch}.$ext',
-      contentType: mime,
-      folder: 'uploads/images',
-    );
+      final result = await MediaService.uploadFile(
+        filePath: file.path,
+        fileName: 'image_${DateTime.now().millisecondsSinceEpoch}.$ext',
+        contentType: mime,
+        folder: 'uploads/images',
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    if (result.isSuccess && result.mediaUrl != null) {
-      context.read<ChatProvider>().sendMessage(
-            chatId: widget.chatId,
-            content: '[Image]',
-            contentType: 'image',
-            mediaUrl: result.mediaUrl,
-          );
-    } else {
+      if (result.isSuccess && result.mediaUrl != null) {
+        context.read<ChatProvider>().sendMessage(
+              chatId: widget.chatId,
+              content: '[Image]',
+              contentType: 'image',
+              mediaUrl: result.mediaUrl,
+            );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content:
+                  Text('Upload failed: ${result.error ?? "unknown error"}')),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content:
-                Text('Upload failed: ${result.error ?? "unknown error"}')),
+        const SnackBar(content: Text('Could not open photo picker')),
       );
     }
   }
@@ -328,30 +345,37 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       isScrollControlled: true,
       builder: (_) => PollCreatorSheet(
         onSend: (jsonContent) async {
-          Navigator.pop(context);
-          final poll = jsonDecode(jsonContent) as Map<String, dynamic>;
-          final question = poll['question'] as String;
-          final options = (poll['options'] as List).cast<String>();
+          try {
+            Navigator.pop(context);
+            final poll = jsonDecode(jsonContent) as Map<String, dynamic>;
+            final question = poll['question'] as String;
+            final options = (poll['options'] as List).cast<String>();
 
-          final chatProvider = context.read<ChatProvider>();
-          final pp = context.read<PollProvider>();
-          final pollId = await pp.createPoll(
-            chatId: widget.chatId,
-            question: question,
-            options: options,
-          );
+            final chatProvider = context.read<ChatProvider>();
+            final pp = context.read<PollProvider>();
+            final pollId = await pp.createPoll(
+              chatId: widget.chatId,
+              question: question,
+              options: options,
+            );
 
-          if (!mounted) return;
+            if (!mounted) return;
 
-          chatProvider.sendMessage(
-                chatId: widget.chatId,
-                content: jsonEncode({
-                  'poll_id': pollId,
-                  'question': question,
-                  'options': options,
-                }),
-                contentType: 'poll',
-              );
+            chatProvider.sendMessage(
+                  chatId: widget.chatId,
+                  content: jsonEncode({
+                    'poll_id': pollId,
+                    'question': question,
+                    'options': options,
+                  }),
+                  contentType: 'poll',
+                );
+          } catch (_) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Could not create poll')),
+            );
+          }
         },
       ),
     );

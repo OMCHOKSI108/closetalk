@@ -18,6 +18,7 @@ class ChatProvider extends ChangeNotifier {
   StreamSubscription? _wsSubscription;
   bool _isConnected = false;
   bool _readNotifyQueued = false;
+  bool _disposed = false;
   String? currentUserId;
 
   List<Message> getMessages(String chatId) => _messages[chatId] ?? [];
@@ -45,9 +46,14 @@ class ChatProvider extends ChangeNotifier {
     if (_readNotifyQueued) return;
     _readNotifyQueued = true;
     Future.microtask(() {
+      if (_disposed) return;
       _readNotifyQueued = false;
-      notifyListeners();
+      _safeNotifyListeners();
     });
+  }
+
+  void _safeNotifyListeners() {
+    if (!_disposed) notifyListeners();
   }
 
   Set<String> typingUsers(String chatId) => _typingUsers[chatId] ?? {};
@@ -66,7 +72,7 @@ class ChatProvider extends ChangeNotifier {
 
   void togglePinned(String chatId) {
     _pinnedChats[chatId] = !(_pinnedChats[chatId] ?? false);
-    notifyListeners();
+    _safeNotifyListeners();
   }
 
   Future<void> fetchMessages(String chatId, {bool refresh = false}) async {
@@ -106,7 +112,7 @@ class ChatProvider extends ChangeNotifier {
           ];
           _nextCursors[chatId] = paginated.nextCursor;
           _hasMore[chatId] = paginated.hasMore;
-          notifyListeners();
+          _safeNotifyListeners();
         }
       } finally {
         client.close();
@@ -147,7 +153,7 @@ class ChatProvider extends ChangeNotifier {
       createdAt: DateTime.now(),
     );
     _messages[chatId] = [optimistic, ...(_messages[chatId] ?? [])];
-    notifyListeners();
+    _safeNotifyListeners();
 
     try {
       final client = http.Client();
@@ -208,13 +214,13 @@ class ChatProvider extends ChangeNotifier {
         list.indexWhere((m) => m.id == replacement.id && m.id != tempId);
     if (existingServerIndex >= 0) {
       list.removeWhere((m) => m.id == tempId);
-      notifyListeners();
+      _safeNotifyListeners();
       return;
     }
     final index = list.indexWhere((m) => m.id == tempId);
     if (index >= 0) {
       list[index] = replacement;
-      notifyListeners();
+      _safeNotifyListeners();
     }
   }
 
@@ -307,7 +313,7 @@ class ChatProvider extends ChangeNotifier {
     final myId = currentUserId;
     if (myId != null) {
       _toggleReactionLocally(messageId: messageId, userId: myId, emoji: emoji);
-      notifyListeners();
+      _safeNotifyListeners();
     }
 
     try {
@@ -325,7 +331,7 @@ class ChatProvider extends ChangeNotifier {
               .map((e) => Reaction.fromJson(e as Map<String, dynamic>))
               .toList();
           _applyReactions(messageId: messageId, reactions: reactions);
-          notifyListeners();
+          _safeNotifyListeners();
         }
       } finally {
         client.close();
@@ -334,7 +340,7 @@ class ChatProvider extends ChangeNotifier {
       // Network error — server didn't see the toggle. Revert.
       if (myId != null) {
         _toggleReactionLocally(messageId: messageId, userId: myId, emoji: emoji);
-        notifyListeners();
+        _safeNotifyListeners();
       }
     }
   }
@@ -473,22 +479,36 @@ class ChatProvider extends ChangeNotifier {
     disconnectWebSocket();
 
     final uri = Uri.parse('${ApiConfig.wsUrl}/ws?token=$token&chat_id=$chatId');
-    _channel = WebSocketChannel.connect(uri);
-    _isConnected = true;
+    try {
+      _channel = WebSocketChannel.connect(uri);
+      _isConnected = true;
+      _safeNotifyListeners();
+    } catch (_) {
+      _isConnected = false;
+      _safeNotifyListeners();
+      return;
+    }
 
     _wsSubscription = _channel!.stream.listen(
       (data) async {
-        final json = jsonDecode(data as String) as Map<String, dynamic>;
-        await _handleWsEvent(json, chatId);
+        try {
+          final raw = data is String ? data : data.toString();
+          final decoded = jsonDecode(raw);
+          if (decoded is Map<String, dynamic>) {
+            await _handleWsEvent(decoded, chatId);
+          }
+        } catch (_) {}
       },
       onDone: () {
         _isConnected = false;
+        _safeNotifyListeners();
         Future.delayed(const Duration(seconds: 3), () {
-          if (ApiConfig.token != null) connectWebSocket(chatId);
+          if (!_disposed && ApiConfig.token != null) connectWebSocket(chatId);
         });
       },
       onError: (_) {
         _isConnected = false;
+        _safeNotifyListeners();
       },
     );
   }
@@ -516,7 +536,7 @@ class ChatProvider extends ChangeNotifier {
         _unreadCounts[msgChatId] = (_unreadCounts[msgChatId] ?? 0) + 1;
       }
 
-      notifyListeners();
+      _safeNotifyListeners();
     } else if (type == 'message.status') {
       final messageId = payload['message_id'] as String?;
       final status = payload['status'] as String?;
@@ -527,7 +547,7 @@ class ChatProvider extends ChangeNotifier {
         final index = list.indexWhere((m) => m.id == messageId);
         if (index >= 0) {
           list[index] = list[index].copyWith(status: status);
-          notifyListeners();
+          _safeNotifyListeners();
           return;
         }
       }
@@ -539,7 +559,7 @@ class ChatProvider extends ChangeNotifier {
           .map((e) => Reaction.fromJson(e as Map<String, dynamic>))
           .toList();
       _applyReactions(messageId: messageId, reactions: reactions);
-      notifyListeners();
+      _safeNotifyListeners();
     } else if (type == 'typing.start' || type == 'typing.stop') {
       final senderId = payload['sender_id'] as String?;
       final eventChatId = payload['chat_id'] as String? ?? chatId;
@@ -551,7 +571,7 @@ class ChatProvider extends ChangeNotifier {
       } else {
         _typingUsers[eventChatId]!.remove(senderId);
       }
-      notifyListeners();
+      _safeNotifyListeners();
     }
   }
 
@@ -563,6 +583,7 @@ class ChatProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     disconnectWebSocket();
     super.dispose();
   }
