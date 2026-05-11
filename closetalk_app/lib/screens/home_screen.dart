@@ -145,7 +145,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     MaterialPageRoute(
                       builder: (_) => const ContactRequestsScreen(),
                     ),
-                  );
+                  ).then((_) => context.read<ContactProvider>().loadContacts());
                 },
               ),
             ),

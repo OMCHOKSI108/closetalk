@@ -125,7 +125,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final chatProvider = context.read<ChatProvider>();
     final pinnedIds = chatProvider.pinnedChatIds;
 
-    var result = List<_Conversation>.from(_conversations);
+    var result = _conversationsWithAcceptedContacts();
 
     switch (_filterIndex) {
       case 1: // Unread
@@ -145,6 +145,27 @@ class _ChatListScreenState extends State<ChatListScreen> {
     });
 
     return result;
+  }
+
+  List<_Conversation> _conversationsWithAcceptedContacts() {
+    final byId = <String, _Conversation>{
+      for (final conversation in _conversations) conversation.chatId: conversation,
+    };
+    final contacts = context.read<ContactProvider>().contacts;
+    for (final contact in contacts) {
+      final chatId = contact.conversationId;
+      if (chatId == null || chatId.isEmpty || byId.containsKey(chatId)) {
+        continue;
+      }
+      byId[chatId] = _Conversation(
+        chatId: chatId,
+        lastMessage: 'Say hello',
+        lastTime: contact.createdAt,
+        senderId: contact.contactId,
+        senderName: contact.displayName,
+      );
+    }
+    return byId.values.toList();
   }
 
   @override

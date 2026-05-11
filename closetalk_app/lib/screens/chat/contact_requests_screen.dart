@@ -62,6 +62,9 @@ class _ContactRequestsScreenState extends State<ContactRequestsScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(error ?? successMessage)),
     );
+    if (error == null && successMessage == 'Request accepted') {
+      Navigator.of(context).pop(true);
+    }
   }
 
   @override
@@ -154,14 +157,23 @@ class _RequestList extends StatelessWidget {
       itemBuilder: (_, index) {
         final contact = contacts[index];
         final busy = working.contains(contact.contactId);
-        final initial = contact.displayName.isNotEmpty
-            ? contact.displayName.substring(0, 1).toUpperCase()
+        final displayName = contact.displayName.trim().isNotEmpty
+            ? contact.displayName.trim()
+            : 'Unknown user';
+        final username = contact.username.trim().isNotEmpty
+            ? contact.username.trim()
+            : contact.contactId.substring(
+                0,
+                contact.contactId.length < 8 ? contact.contactId.length : 8,
+              );
+        final initial = displayName.isNotEmpty
+            ? displayName.substring(0, 1).toUpperCase()
             : '?';
 
         return ListTile(
           leading: CircleAvatar(child: Text(initial)),
-          title: Text(contact.displayName),
-          subtitle: Text('@${contact.username}'),
+          title: Text(displayName),
+          subtitle: Text('@$username'),
           trailing: sentOnly
               ? const Chip(label: Text('Pending'))
               : busy

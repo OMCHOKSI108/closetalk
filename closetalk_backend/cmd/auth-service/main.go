@@ -2328,9 +2328,16 @@ func handleListContacts(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c model.ContactResponse
 		var lastSeen *time.Time
-		rows.Scan(&c.ContactID, &c.Status, &c.ConversationID, &c.CreatedAt,
-			&c.Username, &c.DisplayName, &c.AvatarURL, &c.Bio, &lastSeen)
+		var conversationID *string
+		if err := rows.Scan(&c.ContactID, &c.Status, &conversationID, &c.CreatedAt,
+			&c.Username, &c.DisplayName, &c.AvatarURL, &c.Bio, &lastSeen); err != nil {
+			log.Printf("[contacts] scan error: %v", err)
+			continue
+		}
 		c.ID = c.ContactID
+		if conversationID != nil {
+			c.ConversationID = *conversationID
+		}
 		if lastSeen != nil {
 			c.LastSeen = lastSeen
 		}
