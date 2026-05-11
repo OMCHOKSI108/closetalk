@@ -15,6 +15,7 @@ class Message {
   final List<Reaction> reactions;
   final DateTime createdAt;
   final DateTime? editedAt;
+  final DateTime? disappearedAt;
 
   Message({
     required this.id,
@@ -33,6 +34,7 @@ class Message {
     this.reactions = const [],
     required this.createdAt,
     this.editedAt,
+    this.disappearedAt,
   });
 
   factory Message.fromJson(Map<String, dynamic> json) {
@@ -58,6 +60,9 @@ class Message {
       editedAt: json['edited_at'] != null
           ? DateTime.parse(json['edited_at'] as String)
           : null,
+      disappearedAt: json['disappeared_at'] != null
+          ? DateTime.parse(json['disappeared_at'] as String)
+          : null,
     );
   }
 
@@ -78,6 +83,7 @@ class Message {
         'reactions': reactions.map((r) => r.toJson()).toList(),
         'created_at': createdAt.toIso8601String(),
         'edited_at': editedAt?.toIso8601String(),
+        'disappeared_at': disappearedAt?.toIso8601String(),
       };
 
   Message copyWith({
@@ -97,6 +103,7 @@ class Message {
     List<Reaction>? reactions,
     DateTime? createdAt,
     DateTime? editedAt,
+    DateTime? disappearedAt,
   }) {
     return Message(
       id: id ?? this.id,
@@ -115,6 +122,7 @@ class Message {
       reactions: reactions ?? this.reactions,
       createdAt: createdAt ?? this.createdAt,
       editedAt: editedAt ?? this.editedAt,
+      disappearedAt: disappearedAt ?? this.disappearedAt,
     );
   }
 }

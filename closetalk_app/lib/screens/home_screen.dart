@@ -5,6 +5,7 @@ import '../services/auth_service.dart';
 import '../widgets/user_avatar.dart';
 import 'auth/login_screen.dart';
 import 'chat/chat_list_screen.dart';
+import 'chat/global_search_screen.dart';
 import 'chat/group_list_screen.dart';
 import 'chat/join_group_screen.dart';
 import 'chat/user_profile_screen.dart';
@@ -40,6 +41,17 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_titles[_currentIndex]),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            tooltip: 'Search all chats',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => const GlobalSearchScreen()),
+            ),
+          ),
+        ],
       ),
       drawer: Drawer(
         child: ListView(

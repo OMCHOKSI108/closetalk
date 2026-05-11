@@ -10,6 +10,9 @@ class ChatProvider extends ChangeNotifier {
   final Map<String, List<Message>> _messages = {};
   final Map<String, bool> _hasMore = {};
   final Map<String, String?> _nextCursors = {};
+  final Map<String, Set<String>> _typingUsers = {};
+  final Map<String, bool> _pinnedChats = {};
+  final Map<String, int> _unreadCounts = {};
   WebSocketChannel? _channel;
   StreamSubscription? _wsSubscription;
   bool _isConnected = false;
@@ -18,6 +21,38 @@ class ChatProvider extends ChangeNotifier {
   List<Message> getMessages(String chatId) => _messages[chatId] ?? [];
   bool hasMore(String chatId) => _hasMore[chatId] ?? true;
   bool get isConnected => _isConnected;
+  bool isChatPinned(String chatId) => _pinnedChats[chatId] ?? false;
+  List<String> get pinnedChatIds => _pinnedChats.entries
+      .where((e) => e.value)
+      .map((e) => e.key)
+      .toList();
+
+  int unreadCount(String chatId) => _unreadCounts[chatId] ?? 0;
+  bool hasUnread(String chatId) => unreadCount(chatId) > 0;
+
+  void markChatRead(String chatId) {
+    _unreadCounts[chatId] = 0;
+    notifyListeners();
+  }
+
+  Set<String> typingUsers(String chatId) => _typingUsers[chatId] ?? {};
+  bool isUserTyping(String chatId, String userId) =>
+      (_typingUsers[chatId] ?? {}).contains(userId);
+
+  void sendTyping(String chatId, bool isTyping) {
+    if (_channel == null) return;
+    try {
+      _channel!.sink.add(jsonEncode({
+        'type': isTyping ? 'typing.start' : 'typing.stop',
+        'payload': {'chat_id': chatId},
+      }));
+    } catch (_) {}
+  }
+
+  void togglePinned(String chatId) {
+    _pinnedChats[chatId] = !(_pinnedChats[chatId] ?? false);
+    notifyListeners();
+  }
 
   Future<void> fetchMessages(String chatId, {bool refresh = false}) async {
     if (refresh) {
@@ -62,6 +97,7 @@ class ChatProvider extends ChangeNotifier {
     String? replyToId,
     String? mediaId,
     String? mediaUrl,
+    String? disappearAfter,
   }) async {
     try {
       final client = http.Client();
@@ -76,6 +112,7 @@ class ChatProvider extends ChangeNotifier {
             if (replyToId != null) 'reply_to_id': replyToId,
             if (mediaId != null) 'media_id': mediaId,
             if (mediaUrl != null) 'media_url': mediaUrl,
+            if (disappearAfter != null) 'disappear_after': disappearAfter,
           }),
         );
       } finally {
@@ -252,7 +289,7 @@ class ChatProvider extends ChangeNotifier {
     _wsSubscription = _channel!.stream.listen(
       (data) {
         final json = jsonDecode(data as String) as Map<String, dynamic>;
-        _handleWsEvent(json);
+        _handleWsEvent(json, chatId);
       },
       onDone: () {
         _isConnected = false;
@@ -266,19 +303,19 @@ class ChatProvider extends ChangeNotifier {
     );
   }
 
-  void _handleWsEvent(Map<String, dynamic> event) {
+  void _handleWsEvent(Map<String, dynamic> event, String chatId) {
     final type = event['type'] as String?;
     final payload = event['payload'] as Map<String, dynamic>?;
     if (payload == null) return;
 
     if (type == 'message.new') {
       final msg = Message.fromJson(payload);
-      final chatId = msg.chatId;
-      _messages[chatId] = [msg, ...(_messages[chatId] ?? [])];
+      final msgChatId = msg.chatId;
+      _messages[msgChatId] = [msg, ...(_messages[msgChatId] ?? [])];
 
-      // Auto-mark incoming messages (from others) as delivered
       if (currentUserId != null && msg.senderId != currentUserId) {
         markDelivered(msg.id);
+        _unreadCounts[msgChatId] = (_unreadCounts[msgChatId] ?? 0) + 1;
       }
 
       notifyListeners();
@@ -287,7 +324,6 @@ class ChatProvider extends ChangeNotifier {
       final status = payload['status'] as String?;
       if (messageId == null || status == null) return;
 
-      // Update status in all chat message lists
       for (final entry in _messages.entries) {
         final list = entry.value;
         final index = list.indexWhere((m) => m.id == messageId);
@@ -297,6 +333,18 @@ class ChatProvider extends ChangeNotifier {
           return;
         }
       }
+    } else if (type == 'typing.start' || type == 'typing.stop') {
+      final senderId = payload['sender_id'] as String?;
+      final eventChatId = payload['chat_id'] as String? ?? chatId;
+      if (senderId == null || senderId == currentUserId) return;
+
+      _typingUsers.putIfAbsent(eventChatId, () => {});
+      if (type == 'typing.start') {
+        _typingUsers[eventChatId]!.add(senderId);
+      } else {
+        _typingUsers[eventChatId]!.remove(senderId);
+      }
+      notifyListeners();
     }
   }
 

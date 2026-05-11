@@ -6,6 +6,8 @@ import 'providers/chat_provider.dart';
 import 'providers/contact_provider.dart';
 import 'providers/group_provider.dart';
 import 'providers/bookmark_provider.dart';
+import 'providers/theme_provider.dart';
+import 'providers/call_provider.dart';
 import 'services/auth_service.dart';
 import 'services/group_service.dart';
 import 'services/message_service.dart';
@@ -34,6 +36,8 @@ class CloseTalkApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ContactProvider()),
         ChangeNotifierProvider(create: (_) => GroupProvider()),
         ChangeNotifierProvider(create: (_) => BookmarkProvider()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => CallProvider()),
         Provider(
           create: (_) => AuthService(
             baseUrl: ApiConfig.authBaseUrl,
@@ -53,20 +57,23 @@ class CloseTalkApp extends StatelessWidget {
           ),
         ),
       ],
-      child: Consumer<AuthProvider>(
-        builder: (context, auth, _) {
+      child: Consumer2<AuthProvider, ThemeProvider>(
+        builder: (context, auth, theme, _) {
           return MaterialApp(
             title: 'CloseTalk',
             theme: AppTheme.light,
-            home: _buildHome(auth),
+            darkTheme: AppTheme.dark,
+            themeMode: theme.mode,
+            home: _buildHome(auth, theme),
           );
         },
       ),
     );
   }
 
-  Widget _buildHome(AuthProvider auth) {
+  Widget _buildHome(AuthProvider auth, ThemeProvider theme) {
     if (auth.status == AuthStatus.uninitialized) {
+      theme.load();
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       );

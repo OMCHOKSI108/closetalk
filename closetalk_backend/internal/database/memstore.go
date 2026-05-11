@@ -58,8 +58,12 @@ func (s *MemStore) GetMessages(ctx context.Context, chatID string, cursor time.T
 	defer s.mu.RUnlock()
 
 	var result []*model.Message
+	now := time.Now()
 	for _, msg := range s.messages {
 		if msg.ChatID == chatID && msg.CreatedAt.Before(cursor) && !msg.IsDeleted {
+			if msg.DisappearedAt != nil && msg.DisappearedAt.Before(now) {
+				continue
+			}
 			result = append(result, msg)
 		}
 	}
@@ -213,8 +217,12 @@ func (s *MemStore) SearchMessages(ctx context.Context, chatID string, query stri
 	queryLower := strings.ToLower(query)
 
 	var result []*model.Message
+	now := time.Now()
 	for _, msg := range s.messages {
 		if msg.ChatID == chatID && msg.CreatedAt.Before(cursor) && !msg.IsDeleted {
+			if msg.DisappearedAt != nil && msg.DisappearedAt.Before(now) {
+				continue
+			}
 			if strings.Contains(strings.ToLower(msg.Content), queryLower) {
 				result = append(result, msg)
 			}
@@ -231,6 +239,20 @@ func (s *MemStore) SearchMessages(ctx context.Context, chatID string, query stri
 	}
 
 	return result, hasMore, nil
+}
+
+func (s *MemStore) DeleteExpiredMessages(ctx context.Context) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	var deleted int64
+	for id, msg := range s.messages {
+		if msg.DisappearedAt != nil && msg.DisappearedAt.Before(now) {
+			delete(s.messages, id)
+			deleted++
+		}
+	}
+	return deleted, nil
 }
 
 var GlobalStore MessageStore = NewMemStore()

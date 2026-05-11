@@ -25,11 +25,11 @@ func (s *ScyllaMessageStore) InsertMessage(ctx context.Context, msg *model.Messa
 	}
 	return Scylla.Query(
 		`INSERT INTO closetalk.messages (chat_id, created_at, message_id, sender_id, sender_device_id,
-		 recipient_ids, content, content_type, media_url, media_id, reply_to_id, status, moderation_status, is_deleted)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 recipient_ids, content, content_type, media_url, media_id, reply_to_id, status, moderation_status, is_deleted, disappeared_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		msg.ChatID, msg.CreatedAt, msg.ID, msg.SenderID, msg.SenderDeviceID,
 		recipientIDs, msg.Content, msg.ContentType, msg.MediaURL, msg.MediaID, msg.ReplyToID,
-		msg.Status, msg.ModerationStatus, msg.IsDeleted,
+		msg.Status, msg.ModerationStatus, msg.IsDeleted, msg.DisappearedAt,
 	).WithContext(ctx).Exec()
 }
 
@@ -37,16 +37,19 @@ func (s *ScyllaMessageStore) GetMessage(ctx context.Context, messageID uuid.UUID
 	var msg model.Message
 	err := Scylla.Query(
 		`SELECT chat_id, created_at, message_id, sender_id, content, content_type,
-		 media_url, media_id, reply_to_id, status, moderation_status, is_deleted
+		 media_url, media_id, reply_to_id, status, moderation_status, is_deleted, disappeared_at
 		 FROM closetalk.messages WHERE message_id = ? ALLOW FILTERING`,
 		messageID,
 	).WithContext(ctx).Scan(
 		&msg.ChatID, &msg.CreatedAt, &msg.ID, &msg.SenderID,
 		&msg.Content, &msg.ContentType, &msg.MediaURL, &msg.MediaID,
-		&msg.ReplyToID, &msg.Status, &msg.ModerationStatus, &msg.IsDeleted,
+		&msg.ReplyToID, &msg.Status, &msg.ModerationStatus, &msg.IsDeleted, &msg.DisappearedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get message: %w", err)
+	}
+	if msg.DisappearedAt != nil && msg.DisappearedAt.Before(time.Now()) {
+		return nil, fmt.Errorf("message has disappeared")
 	}
 	return &msg, nil
 }
@@ -54,7 +57,7 @@ func (s *ScyllaMessageStore) GetMessage(ctx context.Context, messageID uuid.UUID
 func (s *ScyllaMessageStore) GetMessages(ctx context.Context, chatID string, cursor time.Time, limit int) ([]*model.Message, bool, error) {
 	iter := Scylla.Query(
 		`SELECT chat_id, created_at, message_id, sender_id, content, content_type,
-		 media_url, media_id, reply_to_id, status, moderation_status, is_deleted
+		 media_url, media_id, reply_to_id, status, moderation_status, is_deleted, disappeared_at
 		 FROM closetalk.messages
 		 WHERE chat_id = ? AND created_at < ?
 		 ORDER BY created_at DESC
@@ -63,12 +66,16 @@ func (s *ScyllaMessageStore) GetMessages(ctx context.Context, chatID string, cur
 	).WithContext(ctx).Iter()
 
 	var messages []*model.Message
+	now := time.Now()
 	var msg model.Message
 	for iter.Scan(
 		&msg.ChatID, &msg.CreatedAt, &msg.ID, &msg.SenderID,
 		&msg.Content, &msg.ContentType, &msg.MediaURL, &msg.MediaID,
-		&msg.ReplyToID, &msg.Status, &msg.ModerationStatus, &msg.IsDeleted,
+		&msg.ReplyToID, &msg.Status, &msg.ModerationStatus, &msg.IsDeleted, &msg.DisappearedAt,
 	) {
+		if msg.DisappearedAt != nil && msg.DisappearedAt.Before(now) {
+			continue
+		}
 		m := msg
 		messages = append(messages, &m)
 	}
@@ -199,7 +206,7 @@ func (s *ScyllaMessageStore) SearchMessages(ctx context.Context, chatID string, 
 
 	iter := Scylla.Query(
 		`SELECT chat_id, created_at, message_id, sender_id, content, content_type,
-		 media_url, media_id, reply_to_id, status, moderation_status, is_deleted
+		 media_url, media_id, reply_to_id, status, moderation_status, is_deleted, disappeared_at
 		 FROM closetalk.messages
 		 WHERE chat_id = ? AND created_at < ?
 		 ORDER BY created_at DESC
@@ -208,13 +215,17 @@ func (s *ScyllaMessageStore) SearchMessages(ctx context.Context, chatID string, 
 	).WithContext(ctx).Iter()
 
 	var matched []*model.Message
+	now := time.Now()
 	var msg model.Message
 	for iter.Scan(
 		&msg.ChatID, &msg.CreatedAt, &msg.ID, &msg.SenderID,
 		&msg.Content, &msg.ContentType, &msg.MediaURL, &msg.MediaID,
-		&msg.ReplyToID, &msg.Status, &msg.ModerationStatus, &msg.IsDeleted,
+		&msg.ReplyToID, &msg.Status, &msg.ModerationStatus, &msg.IsDeleted, &msg.DisappearedAt,
 	) {
 		if msg.IsDeleted {
+			continue
+		}
+		if msg.DisappearedAt != nil && msg.DisappearedAt.Before(now) {
 			continue
 		}
 		if strings.Contains(strings.ToLower(msg.Content), queryLower) {
@@ -232,6 +243,10 @@ func (s *ScyllaMessageStore) SearchMessages(ctx context.Context, chatID string, 
 
 	hasMore := len(matched) == limit
 	return matched, hasMore, nil
+}
+
+func (s *ScyllaMessageStore) DeleteExpiredMessages(ctx context.Context) (int64, error) {
+	return 0, nil
 }
 
 // Ensure compile-time interface compliance

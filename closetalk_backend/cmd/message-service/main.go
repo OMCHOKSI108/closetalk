@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -139,6 +140,22 @@ func main() {
 	}
 
 	go hub.run()
+
+	// Periodic cleanup of expired disappearing messages
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if database.GlobalStore != nil {
+				deleted, err := database.GlobalStore.DeleteExpiredMessages(context.Background())
+				if err != nil {
+					log.Printf("[cleanup] delete expired messages error: %v", err)
+				} else if deleted > 0 {
+					log.Printf("[cleanup] deleted %d expired messages", deleted)
+				}
+			}
+		}
+	}()
 
 	go func() {
 		log.Printf("[message-service] starting on :%s", port)
@@ -380,6 +397,12 @@ func handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.RecipientIDs) > 0 {
 		msg.RecipientIDs = req.RecipientIDs
+	}
+	if req.DisappearAfter != "" && req.DisappearAfter != "off" {
+		if d, err := parseDisappearDuration(req.DisappearAfter); err == nil {
+			t := now.Add(d)
+			msg.DisappearedAt = &t
+		}
 	}
 
 	if err := database.GlobalStore.InsertMessage(context.Background(), msg); err != nil {
@@ -1203,6 +1226,23 @@ func handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 		Statuses: statuses,
 		HasMore:  false,
 	})
+}
+
+func parseDisappearDuration(s string) (time.Duration, error) {
+	switch s {
+	case "5s":
+		return 5 * time.Second, nil
+	case "30s":
+		return 30 * time.Second, nil
+	case "5m":
+		return 5 * time.Minute, nil
+	case "1h":
+		return time.Hour, nil
+	case "24h":
+		return 24 * time.Hour, nil
+	default:
+		return 0, fmt.Errorf("unknown disappear duration: %s", s)
+	}
 }
 
 func handleForceRevokeDevice(w http.ResponseWriter, r *http.Request) {

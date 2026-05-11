@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/theme_provider.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/user_avatar.dart';
 import '../chat/user_profile_screen.dart';
 import 'device_management_screen.dart';
 import 'bookmark_list_screen.dart';
 import 'edit_profile_screen.dart';
+import 'notification_preferences_screen.dart';
 import '../chat/join_group_screen.dart';
 import '../auth/login_screen.dart';
 
@@ -117,6 +119,29 @@ class SettingsScreen extends StatelessWidget {
                   context,
                   MaterialPageRoute(
                       builder: (_) => const JoinGroupScreen()),
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.notifications),
+                title: const Text('Notifications'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) =>
+                          const NotificationPreferencesScreen()),
+                ),
+              ),
+              const Divider(height: 1),
+              Consumer<ThemeProvider>(
+                builder: (_, theme, __) => SwitchListTile(
+                  secondary: Icon(
+                    theme.isDark ? Icons.dark_mode : Icons.light_mode,
+                  ),
+                  title: const Text('Dark Mode'),
+                  value: theme.isDark,
+                  onChanged: (_) => theme.toggle(),
                 ),
               ),
             ],

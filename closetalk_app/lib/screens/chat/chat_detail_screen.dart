@@ -5,18 +5,24 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/message.dart';
 import '../../models/group.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
+import '../../providers/call_provider.dart';
 import '../../providers/group_provider.dart';
 import '../../services/group_service.dart';
 import '../../services/api_config.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/chat_input_bar.dart';
 import '../../widgets/voice_recorder_sheet.dart';
+import '../../widgets/sticker_picker_sheet.dart';
+import '../../widgets/location_picker.dart';
+import '../../widgets/poll_creator_sheet.dart';
 import 'forward_to_screen.dart';
 import 'group_info_screen.dart';
+import 'call_screen.dart';
 
 class ChatDetailScreen extends StatefulWidget {
   final String chatId;
@@ -46,14 +52,22 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   bool _isSearchingMessages = false;
   String? _highlightMessageId;
 
+  String? _replyToMessageId;
+  Message? _repliedMessage;
+
+  Timer? _typingDebounce;
+  bool _isMuted = false;
+
   @override
   void initState() {
     super.initState();
+    _loadMuted();
     final chat = context.read<ChatProvider>();
     final userId = context.read<AuthProvider>().user?.id;
     chat.currentUserId = userId;
     chat.fetchMessages(widget.chatId, refresh: true);
     chat.connectWebSocket(widget.chatId);
+    chat.markChatRead(widget.chatId);
 
     _scrollController.addListener(() {
       if (_scrollController.position.pixels <= 100 && !_isLoadingMore) {
@@ -84,6 +98,32 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     setState(() => _isLoadingMore = true);
     await context.read<ChatProvider>().fetchMessages(widget.chatId);
     setState(() => _isLoadingMore = false);
+  }
+
+  Future<void> _loadMuted() async {
+    final prefs = await SharedPreferences.getInstance();
+    final muted = prefs.getStringList('muted_chats') ?? [];
+    if (mounted) setState(() => _isMuted = muted.contains(widget.chatId));
+  }
+
+  Future<void> _toggleMute() async {
+    final prefs = await SharedPreferences.getInstance();
+    final muted = (prefs.getStringList('muted_chats') ?? []).toList();
+    if (_isMuted) {
+      muted.remove(widget.chatId);
+    } else {
+      muted.add(widget.chatId);
+    }
+    await prefs.setStringList('muted_chats', muted);
+    setState(() => _isMuted = !_isMuted);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_isMuted ? 'Chat muted' : 'Chat unmuted'),
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    }
   }
 
   @override
@@ -188,6 +228,66 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
+  void _createPoll() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => PollCreatorSheet(
+        onSend: (jsonContent) {
+          Navigator.pop(context);
+          context.read<ChatProvider>().sendMessage(
+                chatId: widget.chatId,
+                content: jsonContent,
+                contentType: 'poll',
+              );
+        },
+      ),
+    );
+  }
+
+  void _shareLocation() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => LocationPickerSheet(
+        onSelected: (lat, lng) {
+          Navigator.pop(context);
+          context.read<ChatProvider>().sendMessage(
+                chatId: widget.chatId,
+                content: '$lat,$lng',
+                contentType: 'location',
+              );
+        },
+      ),
+    );
+  }
+
+  void _showStickerPicker() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => StickerPickerSheet(
+        onSelected: (emoji) {
+          Navigator.pop(context);
+          context.read<ChatProvider>().sendMessage(
+                chatId: widget.chatId,
+                content: emoji,
+                contentType: 'sticker',
+              );
+        },
+        onGifSelected: (gifUrl) {
+          Navigator.pop(context);
+          context.read<ChatProvider>().sendMessage(
+                chatId: widget.chatId,
+                content: gifUrl,
+                contentType: 'image',
+                mediaUrl: gifUrl,
+              );
+        },
+      ),
+    );
+  }
+
   void _showVoiceRecorder() {
     showModalBottomSheet(
       context: context,
@@ -228,6 +328,42 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         ),
       ),
     );
+  }
+
+  Message? _findMessageById(String id) {
+    final messages =
+        context.read<ChatProvider>().getMessages(widget.chatId);
+    for (final m in messages) {
+      if (m.id == id) return m;
+    }
+    return null;
+  }
+
+  void _replyToMessage(Message msg) {
+    setState(() {
+      _replyToMessageId = msg.id;
+      _repliedMessage = msg;
+    });
+  }
+
+  void _onTypingChanged(String value) {
+    _typingDebounce?.cancel();
+    final chat = context.read<ChatProvider>();
+    if (value.isNotEmpty) {
+      chat.sendTyping(widget.chatId, true);
+      _typingDebounce = Timer(const Duration(seconds: 3), () {
+        chat.sendTyping(widget.chatId, false);
+      });
+    } else {
+      chat.sendTyping(widget.chatId, false);
+    }
+  }
+
+  void _cancelReply() {
+    setState(() {
+      _replyToMessageId = null;
+      _repliedMessage = null;
+    });
   }
 
   Future<void> _pinMessage(Message msg) async {
@@ -323,6 +459,55 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 tooltip: 'Group info',
               ),
             IconButton(
+              icon: const Icon(Icons.phone, color: Colors.green),
+              tooltip: 'Voice call',
+              onPressed: () {
+                final call = context.read<CallProvider>();
+                call.startCall(
+                  widget.chatId,
+                  widget.chatId,
+                  false,
+                );
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CallScreen(
+                      remoteUserId: widget.chatId,
+                      remoteDisplayName: widget.chatTitle,
+                      isVideo: false,
+                    ),
+                  ),
+                );
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.videocam, color: Colors.blue),
+              tooltip: 'Video call',
+              onPressed: () {
+                final call = context.read<CallProvider>();
+                call.startCall(
+                  widget.chatId,
+                  widget.chatId,
+                  true,
+                );
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CallScreen(
+                      remoteUserId: widget.chatId,
+                      remoteDisplayName: widget.chatTitle,
+                      isVideo: true,
+                    ),
+                  ),
+                );
+              },
+            ),
+            IconButton(
+              icon: Icon(_isMuted ? Icons.volume_off : Icons.volume_up),
+              tooltip: _isMuted ? 'Unmute' : 'Mute',
+              onPressed: _toggleMute,
+            ),
+            IconButton(
               icon: const Icon(Icons.refresh),
               onPressed: () => context
                   .read<ChatProvider>()
@@ -413,6 +598,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   }
                   final msg = messages[i];
                   final isHighlighted = msg.id == _highlightMessageId;
+                  final replied = msg.replyToId != null
+                      ? _findMessageById(msg.replyToId!)
+                      : null;
                   return Container(
                     color: isHighlighted
                         ? Colors.brown.withValues(alpha: 0.12)
@@ -421,6 +609,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       message: msg,
                       isMe: msg.senderId == userId,
                       senderUsername: msg.senderUsername,
+                      repliedMessage: replied,
                       onEdit: msg.senderId == userId
                           ? () => _editMessage(msg)
                           : null,
@@ -430,10 +619,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       onReact: (emoji) => context
                           .read<ChatProvider>()
                           .reactToMessage(msg.id, emoji),
+                      onVote: msg.contentType == 'poll'
+                          ? (option) => _voteInPoll(msg, option)
+                          : null,
                       onPin: widget.groupId != null
                           ? () => _pinMessage(msg)
                           : null,
                       onForward: () => _forwardMessage(msg),
+                      onReply: () => _replyToMessage(msg),
                     ),
                   );
                 },
@@ -441,17 +634,86 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             },
           ),
         ),
-        ChatInputBar(
-          onSend: (text) {
+        Consumer<ChatProvider>(
+          builder: (_, chat, __) {
+            final typing = chat.typingUsers(widget.chatId)
+                .where((uid) => uid != userId)
+                .toList();
+            if (typing.isEmpty) return const SizedBox.shrink();
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              alignment: Alignment.centerLeft,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 8,
+                    height: 8,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      color: Colors.brown[400],
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    typing.length == 1
+                        ? 'Someone is typing...'
+                        : '${typing.length} people are typing...',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[500],
+                        fontStyle: FontStyle.italic),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+          ChatInputBar(
+            onSticker: _showStickerPicker,
+            onLocation: _shareLocation,
+            onPoll: _createPoll,
+            onSend: (text) {
             context
                 .read<ChatProvider>()
-                .sendMessage(chatId: widget.chatId, content: text);
+                .sendMessage(
+                  chatId: widget.chatId,
+                  content: text,
+                  replyToId: _replyToMessageId,
+                );
+            _cancelReply();
+            _typingDebounce?.cancel();
+            context.read<ChatProvider>().sendTyping(widget.chatId, false);
           },
           onAttach: _pickAndSendImage,
           onRecord: _showVoiceRecorder,
+          onTextChanged: _onTypingChanged,
+          replyToName: _repliedMessage?.senderUsername,
+          onCancelReply: _cancelReply,
         ),
       ],
     );
+  }
+
+  void _voteInPoll(Message msg, String option) {
+    try {
+      final poll = jsonDecode(msg.content) as Map<String, dynamic>;
+      final votes = poll['votes'] as Map<String, dynamic>;
+      final userId = context.read<AuthProvider>().user?.id ?? '';
+
+      for (final key in votes.keys) {
+        final voters = (votes[key] as List<dynamic>).cast<String>();
+        voters.remove(userId);
+        votes[key] = voters;
+      }
+
+      final voters = (votes[option] as List<dynamic>).cast<String>();
+      voters.add(userId);
+      votes[option] = voters;
+      poll['votes'] = votes;
+
+      context.read<ChatProvider>().editMessage(msg.id, jsonEncode(poll));
+    } catch (_) {}
   }
 
   void _editMessage(Message msg) {

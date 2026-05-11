@@ -223,6 +223,7 @@ type dynamoMessage struct {
 	IsDeleted        bool     `dynamodbav:"is_deleted"`
 	CreatedAt        string   `dynamodbav:"created_at"`
 	EditedAt         string   `dynamodbav:"edited_at,omitempty"`
+	DisappearedAt    string   `dynamodbav:"disappeared_at,omitempty"`
 }
 
 type dynamoReaction struct {
@@ -278,6 +279,9 @@ func (s *DynamoDBStore) InsertMessage(ctx context.Context, msg *model.Message) e
 		EditHistory:      editHistory,
 		IsDeleted:        msg.IsDeleted,
 		CreatedAt:        msg.CreatedAt.UTC().Format(time.RFC3339Nano),
+	}
+	if msg.DisappearedAt != nil {
+		item.DisappearedAt = msg.DisappearedAt.UTC().Format(time.RFC3339Nano)
 	}
 
 	av, err := attributevalue.MarshalMap(item)
@@ -335,14 +339,19 @@ func (s *DynamoDBStore) GetMessages(ctx context.Context, chatID string, cursor t
 	hasMore := result.LastEvaluatedKey != nil
 
 	messages := make([]*model.Message, 0, len(result.Items))
+	now := time.Now()
 	for _, item := range result.Items {
 		msg, err := unmarshalMessage(item)
 		if err != nil {
 			continue
 		}
-		if !msg.IsDeleted {
-			messages = append(messages, msg)
+		if msg.IsDeleted {
+			continue
 		}
+		if msg.DisappearedAt != nil && msg.DisappearedAt.Before(now) {
+			continue
+		}
+		messages = append(messages, msg)
 	}
 
 	return messages, hasMore, nil
@@ -647,6 +656,13 @@ func unmarshalMessage(item map[string]types.AttributeValue) (*model.Message, err
 		}
 	}
 
+	var disappearedAt *time.Time
+	if dm.DisappearedAt != "" {
+		if t, err := time.Parse(time.RFC3339Nano, dm.DisappearedAt); err == nil {
+			disappearedAt = &t
+		}
+	}
+
 	return &model.Message{
 		ID:               msgID,
 		ChatID:           dm.ChatID,
@@ -664,6 +680,7 @@ func unmarshalMessage(item map[string]types.AttributeValue) (*model.Message, err
 		IsDeleted:        dm.IsDeleted,
 		CreatedAt:        createdAt,
 		EditedAt:         editedAt,
+		DisappearedAt:    disappearedAt,
 	}, nil
 }
 
@@ -687,9 +704,13 @@ func (s *DynamoDBStore) SearchMessages(ctx context.Context, chatID string, query
 	}
 
 	var matched []*model.Message
+	now := time.Now()
 	for _, item := range result.Items {
 		msg, err := unmarshalMessage(item)
 		if err != nil || msg.IsDeleted {
+			continue
+		}
+		if msg.DisappearedAt != nil && msg.DisappearedAt.Before(now) {
 			continue
 		}
 		if strings.Contains(strings.ToLower(msg.Content), queryLower) {
@@ -704,6 +725,10 @@ func (s *DynamoDBStore) SearchMessages(ctx context.Context, chatID string, query
 	}
 
 	return matched, hasMore, nil
+}
+
+func (s *DynamoDBStore) DeleteExpiredMessages(ctx context.Context) (int64, error) {
+	return 0, nil
 }
 
 var _ MessageStore = (*DynamoDBStore)(nil)

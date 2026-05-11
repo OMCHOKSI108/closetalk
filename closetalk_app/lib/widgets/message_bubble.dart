@@ -3,27 +3,35 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/message.dart';
 import 'voice_message_content.dart';
+import 'location_content.dart';
+import 'poll_content.dart';
 
 class MessageBubble extends StatelessWidget {
   final Message message;
   final bool isMe;
   final String? senderUsername;
+  final Message? repliedMessage;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
   final void Function(String emoji)? onReact;
+  final void Function(String option)? onVote;
   final VoidCallback? onPin;
   final VoidCallback? onForward;
+  final VoidCallback? onReply;
 
   const MessageBubble({
     super.key,
     required this.message,
     required this.isMe,
     this.senderUsername,
+    this.repliedMessage,
     this.onEdit,
     this.onDelete,
     this.onReact,
+    this.onVote,
     this.onPin,
     this.onForward,
+    this.onReply,
   });
 
   Widget _buildStatusIcon() {
@@ -98,6 +106,15 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
+  Widget _buildLocationContent() {
+    final parts = message.content.split(',');
+    if (parts.length != 2) return const Text('Invalid location');
+    final lat = double.tryParse(parts[0]);
+    final lng = double.tryParse(parts[1]);
+    if (lat == null || lng == null) return const Text('Invalid location');
+    return LocationContent(latitude: lat, longitude: lng);
+  }
+
   Widget _buildImageContent(String base64Str) {
     try {
       final bytes = base64Decode(base64Str);
@@ -114,6 +131,50 @@ class MessageBubble extends StatelessWidget {
     }
   }
 
+  Widget _buildReplyPreview(Message replied) {
+    final preview = replied.contentType == 'image'
+        ? '[Image]'
+        : replied.contentType == 'voice'
+            ? '[Voice]'
+            : replied.content.length > 80
+                ? '${replied.content.substring(0, 80)}...'
+                : replied.content;
+
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: isMe ? Colors.blue[50] : Colors.grey[200],
+        borderRadius: BorderRadius.circular(6),
+        border: Border(
+          left: BorderSide(
+            color: isMe ? Colors.blue[400]! : Colors.grey[400]!,
+            width: 3,
+          ),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '@${replied.senderUsername ?? replied.senderId}',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: isMe ? Colors.blue[800] : Colors.grey[700],
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            preview,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final time = DateFormat('HH:mm').format(message.createdAt);
@@ -124,15 +185,10 @@ class MessageBubble extends StatelessWidget {
       child: Column(
         crossAxisAlignment: alignment,
         children: [
-          if (message.replyToId != null)
-            Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                color: Colors.grey[200],
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text('Replying...',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+          if (repliedMessage != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: _buildReplyPreview(repliedMessage!),
             ),
           InkWell(
             onLongPress: onReact != null
@@ -215,13 +271,41 @@ class MessageBubble extends StatelessWidget {
                         isMe: isMe,
                       ),
                     ),
+                  if (message.contentType == 'location')
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: _buildLocationContent(),
+                    ),
+                  if (message.contentType == 'poll')
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: PollContent(
+                        jsonContent: message.content,
+                        myUserId: message.senderId,
+                        onVote: (option) => onVote?.call(option),
+                      ),
+                    ),
                   const SizedBox(height: 2),
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      if (message.disappearedAt != null)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: Icon(Icons.timer_outlined,
+                              size: 12, color: Colors.grey[500]),
+                        ),
                       Text(time,
                           style: TextStyle(
                               fontSize: 11, color: Colors.grey[600])),
+                      if (message.editedAt != null) ...[
+                        const SizedBox(width: 4),
+                        Text('(edited)',
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[500],
+                                fontStyle: FontStyle.italic)),
+                      ],
                       if (isMe) ...[
                         const SizedBox(width: 4),
                         _buildStatusIcon(),
@@ -259,7 +343,7 @@ class MessageBubble extends StatelessWidget {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (onEdit != null || onDelete != null || onPin != null || onForward != null)
+              if (onEdit != null || onDelete != null || onPin != null || onForward != null || onReply != null)
                 PopupMenuButton<String>(
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
@@ -268,20 +352,24 @@ class MessageBubble extends StatelessWidget {
                     if (value == 'delete') onDelete?.call();
                     if (value == 'pin') onPin?.call();
                     if (value == 'forward') onForward?.call();
+                    if (value == 'reply') onReply?.call();
                   },
                   itemBuilder: (_) => [
+                    if (onReply != null)
+                      const PopupMenuItem(
+                          value: 'reply', child: Text('Reply')),
+                    if (onForward != null)
+                      const PopupMenuItem(
+                          value: 'forward', child: Text('Forward')),
+                    if (onPin != null)
+                      const PopupMenuItem(
+                          value: 'pin', child: Text('Pin')),
                     if (onEdit != null)
                       const PopupMenuItem(
                           value: 'edit', child: Text('Edit')),
                     if (onDelete != null)
                       const PopupMenuItem(
                           value: 'delete', child: Text('Delete')),
-                    if (onPin != null)
-                      const PopupMenuItem(
-                          value: 'pin', child: Text('Pin')),
-                    if (onForward != null)
-                      const PopupMenuItem(
-                          value: 'forward', child: Text('Forward')),
                   ],
                   child: const Icon(Icons.more_horiz, size: 16),
                 ),

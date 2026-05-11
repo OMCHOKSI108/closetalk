@@ -76,6 +76,7 @@ type MessageResponse struct {
 	Reactions        []Reaction  `json:"reactions,omitempty"`
 	CreatedAt        time.Time   `json:"created_at"`
 	EditedAt         *time.Time  `json:"edited_at,omitempty"`
+	DisappearedAt    *time.Time  `json:"disappeared_at,omitempty"`
 }
 
 type Reaction struct {
