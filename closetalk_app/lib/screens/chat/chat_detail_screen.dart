@@ -694,135 +694,147 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Widget _buildChat(String userId) {
-    return Column(
-      children: [
-        Expanded(
-          child: Consumer<ChatProvider>(
-            builder: (_, chat, _) {
-              final messages = chat.getMessages(widget.chatId);
-              if (messages.isEmpty) {
-                return const Center(child: Text('No messages yet'));
-              }
-              return ListView.builder(
-                controller: _scrollController,
-                reverse: true,
-                itemCount: messages.length + (_isLoadingMore ? 1 : 0),
-                itemBuilder: (_, i) {
-                  if (i == messages.length) {
-                    return const Padding(
-                      padding: EdgeInsets.all(8),
-                      child: Center(child: CircularProgressIndicator()),
+    final scheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+      ),
+      child: Column(
+        children: [
+          Expanded(
+            child: Consumer<ChatProvider>(
+              builder: (_, chat, _) {
+                final messages = chat.getMessages(widget.chatId);
+                if (messages.isEmpty) {
+                  return _EmptyChatState(title: widget.chatTitle);
+                }
+                return ListView.builder(
+                  controller: _scrollController,
+                  reverse: true,
+                  padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
+                  itemCount: messages.length + (_isLoadingMore ? 1 : 0),
+                  itemBuilder: (_, i) {
+                    if (i == messages.length) {
+                      return const Padding(
+                        padding: EdgeInsets.all(8),
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    final msg = messages[i];
+                    final isHighlighted = msg.id == _highlightMessageId;
+                    final replied = msg.replyToId != null
+                        ? _findMessageById(msg.replyToId!)
+                        : null;
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      color: isHighlighted
+                          ? scheme.secondaryContainer.withValues(alpha: 0.55)
+                          : Colors.transparent,
+                      child: MessageBubble(
+                        message: msg,
+                        isMe: msg.senderId == userId,
+                        senderUsername: msg.senderUsername,
+                        repliedMessage: replied,
+                        onEdit: msg.senderId == userId
+                            ? () => _editMessage(msg)
+                            : null,
+                        onDelete: msg.senderId == userId
+                            ? () => _deleteMessage(msg)
+                            : null,
+                        onReact: (emoji) => context
+                            .read<ChatProvider>()
+                            .reactToMessage(msg.id, emoji),
+                        onVote: msg.contentType == 'poll'
+                            ? (option) => _voteInPoll(msg, option)
+                            : null,
+                        onPin: widget.groupId != null
+                            ? () => _pinMessage(msg)
+                            : null,
+                        onForward: () => _forwardMessage(msg),
+                        onReply: () => _replyToMessage(msg),
+                      ),
                     );
-                  }
-                  final msg = messages[i];
-                  final isHighlighted = msg.id == _highlightMessageId;
-                  final replied = msg.replyToId != null
-                      ? _findMessageById(msg.replyToId!)
-                      : null;
-                  return Container(
-                    color: isHighlighted
-                        ? Colors.brown.withValues(alpha: 0.12)
-                        : null,
-                    child: MessageBubble(
-                      message: msg,
-                      isMe: msg.senderId == userId,
-                      senderUsername: msg.senderUsername,
-                      repliedMessage: replied,
-                      onEdit: msg.senderId == userId
-                          ? () => _editMessage(msg)
-                          : null,
-                      onDelete: msg.senderId == userId
-                          ? () => _deleteMessage(msg)
-                          : null,
-                      onReact: (emoji) => context
-                          .read<ChatProvider>()
-                          .reactToMessage(msg.id, emoji),
-                      onVote: msg.contentType == 'poll'
-                          ? (option) => _voteInPoll(msg, option)
-                          : null,
-                      onPin: widget.groupId != null
-                          ? () => _pinMessage(msg)
-                          : null,
-                      onForward: () => _forwardMessage(msg),
-                      onReply: () => _replyToMessage(msg),
+                  },
+                );
+              },
+            ),
+          ),
+          Consumer<ChatProvider>(
+            builder: (_, chat, _) {
+              final typing = chat
+                  .typingUsers(widget.chatId)
+                  .where((uid) => uid != userId)
+                  .toList();
+              if (typing.isEmpty) return const SizedBox.shrink();
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                alignment: Alignment.centerLeft,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 8,
+                          height: 8,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.5,
+                            color: scheme.primary,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          typing.length == 1
+                              ? 'Typing...'
+                              : '${typing.length} people typing...',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
                     ),
-                  );
-                },
+                  ),
+                ),
               );
             },
           ),
-        ),
-        Consumer<ChatProvider>(
-          builder: (_, chat, _) {
-            final typing = chat.typingUsers(widget.chatId)
-                .where((uid) => uid != userId)
-                .toList();
-            if (typing.isEmpty) return const SizedBox.shrink();
-            return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              alignment: Alignment.centerLeft,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    width: 8,
-                    height: 8,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 1.5,
-                      color: Colors.brown[400],
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    typing.length == 1
-                        ? 'Someone is typing...'
-                        : '${typing.length} people are typing...',
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[500],
-                        fontStyle: FontStyle.italic),
-                  ),
-                ],
-              ),
-            );
-          },
-        ),
           ChatInputBar(
             onSticker: _showStickerPicker,
             onLocation: _shareLocation,
             onPoll: _createPoll,
             onSend: (text) {
-            context
-                .read<ChatProvider>()
-                .sendMessage(
-                  chatId: widget.chatId,
-                  content: text,
-                  replyToId: _replyToMessageId,
-                );
-            _cancelReply();
-            _typingDebounce?.cancel();
-            context.read<ChatProvider>().sendTyping(widget.chatId, false);
-          },
-          onSendFormatted: (text) {
-            context
-                .read<ChatProvider>()
-                .sendMessage(
-                  chatId: widget.chatId,
-                  content: text,
-                  contentType: 'formatted',
-                  replyToId: _replyToMessageId,
-                );
-            _cancelReply();
-            _typingDebounce?.cancel();
-            context.read<ChatProvider>().sendTyping(widget.chatId, false);
-          },
-          onAttach: _pickAndSendImage,
-          onRecord: _showVoiceRecorder,
-          onTextChanged: _onTypingChanged,
-          replyToName: _repliedMessage?.senderUsername,
-          onCancelReply: _cancelReply,
-        ),
-      ],
+              context.read<ChatProvider>().sendMessage(
+                    chatId: widget.chatId,
+                    content: text,
+                    replyToId: _replyToMessageId,
+                  );
+              _cancelReply();
+              _typingDebounce?.cancel();
+              context.read<ChatProvider>().sendTyping(widget.chatId, false);
+            },
+            onSendFormatted: (text) {
+              context.read<ChatProvider>().sendMessage(
+                    chatId: widget.chatId,
+                    content: text,
+                    contentType: 'formatted',
+                    replyToId: _replyToMessageId,
+                  );
+              _cancelReply();
+              _typingDebounce?.cancel();
+              context.read<ChatProvider>().sendTyping(widget.chatId, false);
+            },
+            onAttach: _pickAndSendImage,
+            onRecord: _showVoiceRecorder,
+            onTextChanged: _onTypingChanged,
+            replyToName: _repliedMessage?.senderUsername,
+            onCancelReply: _cancelReply,
+          ),
+        ],
+      ),
     );
   }
 
@@ -886,6 +898,49 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             child: const Text('Delete', style: TextStyle(color: Colors.red)),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _EmptyChatState extends StatelessWidget {
+  final String title;
+
+  const _EmptyChatState({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final name = title.trim().isEmpty ? 'this chat' : title.trim();
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 34,
+              backgroundColor: scheme.primaryContainer,
+              child: Icon(
+                Icons.chat_bubble_outline,
+                color: scheme.onPrimaryContainer,
+                size: 32,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Start chatting with $name',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Send a message, voice note, photo, poll, sticker, or location.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
       ),
     );
   }

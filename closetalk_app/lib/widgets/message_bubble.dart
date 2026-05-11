@@ -178,11 +178,17 @@ class MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final time = DateFormat('HH:mm').format(message.createdAt);
     final alignment = isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start;
+    final bubbleColor =
+        isMe ? scheme.primaryContainer : scheme.surfaceContainerHighest;
+    final textColor =
+        isMe ? scheme.onPrimaryContainer : scheme.onSurfaceVariant;
+    final metaColor = textColor.withValues(alpha: 0.72);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       child: Column(
         crossAxisAlignment: alignment,
         children: [
@@ -203,12 +209,17 @@ class MessageBubble extends StatelessWidget {
               padding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: isMe ? Colors.blue[100] : Colors.grey[100],
+                color: bubbleColor,
                 borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(16),
-                  topRight: const Radius.circular(16),
-                  bottomLeft: Radius.circular(isMe ? 16 : 4),
-                  bottomRight: Radius.circular(isMe ? 4 : 16),
+                  topLeft: const Radius.circular(18),
+                  topRight: const Radius.circular(18),
+                  bottomLeft: Radius.circular(isMe ? 18 : 6),
+                  bottomRight: Radius.circular(isMe ? 6 : 18),
+                ),
+                border: Border.all(
+                  color: isMe
+                      ? scheme.primary.withValues(alpha: 0.12)
+                      : scheme.outline.withValues(alpha: 0.18),
                 ),
               ),
               child: Column(
@@ -220,7 +231,7 @@ class MessageBubble extends StatelessWidget {
                       child: Text('@$senderUsername',
                           style: TextStyle(
                               fontSize: 11,
-                              color: Colors.blue[700],
+                              color: scheme.primary,
                               fontWeight: FontWeight.w500)),
                     ),
                   if (message.forwardedFrom != null &&
@@ -243,12 +254,12 @@ class MessageBubble extends StatelessWidget {
                   if (message.contentType == 'text' ||
                       message.contentType.isEmpty)
                     Text(message.content,
-                        style: const TextStyle(fontSize: 15)),
+                        style: TextStyle(fontSize: 15, color: textColor)),
                   if (message.contentType == 'formatted')
                     MarkdownBody(
                       data: message.content,
                       styleSheet: MarkdownStyleSheet(
-                        p: const TextStyle(fontSize: 15),
+                        p: TextStyle(fontSize: 15, color: textColor),
                         strong: const TextStyle(
                             fontSize: 15, fontWeight: FontWeight.bold),
                         code: TextStyle(
@@ -277,7 +288,10 @@ class MessageBubble extends StatelessWidget {
                         Icon(Icons.lock, size: 12, color: Colors.grey[500]),
                         const SizedBox(width: 4),
                         Text('Encrypted message',
-                            style: TextStyle(fontSize: 13, color: Colors.grey[500], fontStyle: FontStyle.italic)),
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: metaColor,
+                                fontStyle: FontStyle.italic)),
                       ],
                     ),
                   if (message.contentType == 'image' &&
@@ -334,13 +348,13 @@ class MessageBubble extends StatelessWidget {
                         ),
                       Text(time,
                           style: TextStyle(
-                              fontSize: 11, color: Colors.grey[600])),
+                              fontSize: 11, color: metaColor)),
                       if (message.editedAt != null) ...[
                         const SizedBox(width: 4),
                         Text('(edited)',
                             style: TextStyle(
                                 fontSize: 11,
-                                color: Colors.grey[500],
+                                color: metaColor,
                                 fontStyle: FontStyle.italic)),
                       ],
                       if (isMe) ...[
