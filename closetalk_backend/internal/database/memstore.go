@@ -134,6 +134,16 @@ func (s *MemStore) GetReactions(ctx context.Context, messageID uuid.UUID) ([]mod
 	return reactions, nil
 }
 
+func (s *MemStore) MarkDelivered(ctx context.Context, messageID uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	msg, ok := s.messages[messageID]
+	if ok {
+		msg.Status = "delivered"
+	}
+	return nil
+}
+
 func (s *MemStore) MarkRead(ctx context.Context, messageID uuid.UUID, userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

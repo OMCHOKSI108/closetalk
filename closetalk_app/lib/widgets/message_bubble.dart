@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/message.dart';
+import 'voice_message_content.dart';
 
 class MessageBubble extends StatelessWidget {
   final Message message;
@@ -11,6 +12,7 @@ class MessageBubble extends StatelessWidget {
   final VoidCallback? onDelete;
   final void Function(String emoji)? onReact;
   final VoidCallback? onPin;
+  final VoidCallback? onForward;
 
   const MessageBubble({
     super.key,
@@ -21,7 +23,34 @@ class MessageBubble extends StatelessWidget {
     this.onDelete,
     this.onReact,
     this.onPin,
+    this.onForward,
   });
+
+  Widget _buildStatusIcon() {
+    switch (message.status) {
+      case 'sending':
+        return SizedBox(
+          width: 14,
+          height: 14,
+          child: CircularProgressIndicator(
+            strokeWidth: 1.5,
+            color: Colors.grey[500],
+          ),
+        );
+      case 'sent':
+        return Icon(Icons.check, size: 14, color: Colors.grey[500]);
+      case 'delivered':
+        return Icon(Icons.done_all, size: 14, color: Colors.grey[500]);
+      case 'read':
+        return Icon(
+          Icons.done_all,
+          size: 14,
+          color: Colors.blue[400],
+        );
+      default:
+        return Icon(Icons.access_time, size: 14, color: Colors.grey[500]);
+    }
+  }
 
   void _showEmojiPicker(BuildContext context) {
     final emojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
@@ -137,6 +166,23 @@ class MessageBubble extends StatelessWidget {
                               color: Colors.blue[700],
                               fontWeight: FontWeight.w500)),
                     ),
+                  if (message.forwardedFrom != null &&
+                      message.forwardedFrom!.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 2),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.reply, size: 12, color: Colors.grey[500]),
+                          const SizedBox(width: 3),
+                          Text('Forwarded from @${message.forwardedFrom}',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey[500],
+                                  fontStyle: FontStyle.italic)),
+                        ],
+                      ),
+                    ),
                   if (message.contentType == 'text' ||
                       message.contentType.isEmpty)
                     Text(message.content,
@@ -148,7 +194,8 @@ class MessageBubble extends StatelessWidget {
                       child: _buildImageContent(message.content),
                     )
                   else if (message.mediaUrl != null &&
-                      message.mediaUrl!.isNotEmpty)
+                      message.mediaUrl!.isNotEmpty &&
+                      message.contentType != 'voice')
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: Image.network(
@@ -160,6 +207,14 @@ class MessageBubble extends StatelessWidget {
                             const Icon(Icons.broken_image, size: 50),
                       ),
                     ),
+                  if (message.contentType == 'voice')
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: VoiceMessageContent(
+                        message: message,
+                        isMe: isMe,
+                      ),
+                    ),
                   const SizedBox(height: 2),
                   Row(
                     mainAxisSize: MainAxisSize.min,
@@ -169,13 +224,7 @@ class MessageBubble extends StatelessWidget {
                               fontSize: 11, color: Colors.grey[600])),
                       if (isMe) ...[
                         const SizedBox(width: 4),
-                        Icon(
-                          message.status == 'sent'
-                              ? Icons.check
-                              : Icons.access_time,
-                          size: 14,
-                          color: Colors.grey[600],
-                        ),
+                        _buildStatusIcon(),
                       ],
                     ],
                   ),
@@ -210,7 +259,7 @@ class MessageBubble extends StatelessWidget {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (isMe && (onEdit != null || onDelete != null))
+              if (onEdit != null || onDelete != null || onPin != null || onForward != null)
                 PopupMenuButton<String>(
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
@@ -218,6 +267,7 @@ class MessageBubble extends StatelessWidget {
                     if (value == 'edit') onEdit?.call();
                     if (value == 'delete') onDelete?.call();
                     if (value == 'pin') onPin?.call();
+                    if (value == 'forward') onForward?.call();
                   },
                   itemBuilder: (_) => [
                     if (onEdit != null)
@@ -229,6 +279,9 @@ class MessageBubble extends StatelessWidget {
                     if (onPin != null)
                       const PopupMenuItem(
                           value: 'pin', child: Text('Pin')),
+                    if (onForward != null)
+                      const PopupMenuItem(
+                          value: 'forward', child: Text('Forward')),
                   ],
                   child: const Icon(Icons.more_horiz, size: 16),
                 ),

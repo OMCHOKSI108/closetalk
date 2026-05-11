@@ -14,6 +14,8 @@ import '../../services/group_service.dart';
 import '../../services/api_config.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/chat_input_bar.dart';
+import '../../widgets/voice_recorder_sheet.dart';
+import 'forward_to_screen.dart';
 import 'group_info_screen.dart';
 
 class ChatDetailScreen extends StatefulWidget {
@@ -48,6 +50,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   void initState() {
     super.initState();
     final chat = context.read<ChatProvider>();
+    final userId = context.read<AuthProvider>().user?.id;
+    chat.currentUserId = userId;
     chat.fetchMessages(widget.chatId, refresh: true);
     chat.connectWebSocket(widget.chatId);
 
@@ -55,7 +59,25 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       if (_scrollController.position.pixels <= 100 && !_isLoadingMore) {
         _loadMore();
       }
+      // Auto-mark visible messages as read when scrolling near bottom
+      if (_scrollController.position.pixels >=
+          _scrollController.position.maxScrollExtent - 200) {
+        _markVisibleAsRead();
+      }
     });
+  }
+
+  void _markVisibleAsRead() {
+    final chat = context.read<ChatProvider>();
+    final messages = chat.getMessages(widget.chatId);
+    if (messages.isEmpty) return;
+
+    // Mark the oldest visible message as seen (batched via WS)
+    final oldest = messages.last;
+    if (oldest.senderId != (context.read<AuthProvider>().user?.id ?? '') &&
+        oldest.status != 'read') {
+      chat.markRead(oldest.id);
+    }
   }
 
   Future<void> _loadMore() async {
@@ -163,6 +185,48 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       chatId: widget.chatId,
       content: b64,
       contentType: 'image',
+    );
+  }
+
+  void _showVoiceRecorder() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => VoiceRecorderSheet(
+        onUpload: (path, duration) async {
+          final chat = context.read<ChatProvider>();
+          final result = await chat.uploadVoice(path, duration);
+          if (result != null) {
+            await chat.sendMessage(
+              chatId: widget.chatId,
+              content: result['duration'] ?? duration.toStringAsFixed(1),
+              contentType: 'voice',
+              mediaUrl: result['media_url'],
+            );
+            return result;
+          }
+          return null;
+        },
+        onCancel: () {},
+      ),
+    );
+  }
+
+  void _forwardMessage(Message msg) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ForwardToScreen(
+          messageId: msg.id,
+          onForward: (messageId, targetChatIds) async {
+            final chat = context.read<ChatProvider>();
+            return chat.forwardMessage(
+              messageId: messageId,
+              targetChatIds: targetChatIds,
+            );
+          },
+        ),
+      ),
     );
   }
 
@@ -369,6 +433,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       onPin: widget.groupId != null
                           ? () => _pinMessage(msg)
                           : null,
+                      onForward: () => _forwardMessage(msg),
                     ),
                   );
                 },
@@ -383,6 +448,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 .sendMessage(chatId: widget.chatId, content: text);
           },
           onAttach: _pickAndSendImage,
+          onRecord: _showVoiceRecorder,
         ),
       ],
     );

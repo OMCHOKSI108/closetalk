@@ -3,12 +3,14 @@ import 'package:flutter/material.dart';
 class ChatInputBar extends StatefulWidget {
   final void Function(String text) onSend;
   final VoidCallback? onAttach;
+  final VoidCallback? onRecord;
   final bool isLoading;
 
   const ChatInputBar({
     super.key,
     required this.onSend,
     this.onAttach,
+    this.onRecord,
     this.isLoading = false,
   });
 
@@ -53,6 +55,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
               IconButton(
                 icon: const Icon(Icons.attach_file, color: Colors.blue),
                 onPressed: widget.onAttach,
+              ),
+            if (widget.onRecord != null)
+              IconButton(
+                icon: const Icon(Icons.mic, color: Colors.blue),
+                onPressed: widget.onRecord,
               ),
             Expanded(
               child: TextField(

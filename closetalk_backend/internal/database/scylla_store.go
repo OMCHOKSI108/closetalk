@@ -137,6 +137,13 @@ func (s *ScyllaMessageStore) GetReactions(ctx context.Context, messageID uuid.UU
 	return reactions, nil
 }
 
+func (s *ScyllaMessageStore) MarkDelivered(ctx context.Context, messageID uuid.UUID) error {
+	return Scylla.Query(
+		`UPDATE closetalk.messages SET status = 'delivered' WHERE message_id = ? ALLOW FILTERING`,
+		messageID,
+	).WithContext(ctx).Exec()
+}
+
 func (s *ScyllaMessageStore) MarkRead(ctx context.Context, messageID uuid.UUID, userID string) error {
 	return Scylla.Query(
 		`INSERT INTO closetalk.message_reads (message_id, user_id, read_at) VALUES (?, ?, ?)`,

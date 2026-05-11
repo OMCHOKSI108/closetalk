@@ -17,6 +17,7 @@ type Message struct {
 	MediaURL         string      `json:"media_url,omitempty"`
 	MediaID          string      `json:"media_id,omitempty"`
 	ReplyToID        *uuid.UUID  `json:"reply_to_id,omitempty"`
+	ForwardedFrom    string      `json:"forwarded_from,omitempty"`
 	Status           string      `json:"status"` // sending | sent | delivered | read
 	ModerationStatus string      `json:"moderation_status,omitempty"`
 	EditHistory      []EditEntry `json:"edit_history,omitempty"`
@@ -35,10 +36,17 @@ type SendMessageRequest struct {
 	ChatID         string   `json:"chat_id"`
 	Content        string   `json:"content"`
 	ContentType    string   `json:"content_type"`
+	MediaURL       string   `json:"media_url,omitempty"`
 	MediaID        string   `json:"media_id,omitempty"`
 	ReplyToID      string   `json:"reply_to_id,omitempty"`
+	ForwardedFrom  string   `json:"forwarded_from,omitempty"`
 	DisappearAfter string   `json:"disappear_after,omitempty"`
 	RecipientIDs   []string `json:"recipient_ids,omitempty"` // for multi-device fan-out
+}
+
+type ForwardMessageRequest struct {
+	MessageID     string   `json:"message_id"`
+	TargetChatIDs []string `json:"target_chat_ids"`
 }
 
 type EditMessageRequest struct {
@@ -60,6 +68,7 @@ type MessageResponse struct {
 	MediaURL         string      `json:"media_url,omitempty"`
 	MediaID          string      `json:"media_id,omitempty"`
 	ReplyToID        *uuid.UUID  `json:"reply_to_id,omitempty"`
+	ForwardedFrom    string      `json:"forwarded_from,omitempty"`
 	Status           string      `json:"status"`
 	ModerationStatus string      `json:"moderation_status,omitempty"`
 	EditHistory      []EditEntry `json:"edit_history,omitempty"`

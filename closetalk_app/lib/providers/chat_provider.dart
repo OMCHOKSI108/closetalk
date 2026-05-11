@@ -13,6 +13,7 @@ class ChatProvider extends ChangeNotifier {
   WebSocketChannel? _channel;
   StreamSubscription? _wsSubscription;
   bool _isConnected = false;
+  String? currentUserId;
 
   List<Message> getMessages(String chatId) => _messages[chatId] ?? [];
   bool hasMore(String chatId) => _hasMore[chatId] ?? true;
@@ -60,6 +61,7 @@ class ChatProvider extends ChangeNotifier {
     String contentType = 'text',
     String? replyToId,
     String? mediaId,
+    String? mediaUrl,
   }) async {
     try {
       final client = http.Client();
@@ -73,12 +75,67 @@ class ChatProvider extends ChangeNotifier {
             'content_type': contentType,
             if (replyToId != null) 'reply_to_id': replyToId,
             if (mediaId != null) 'media_id': mediaId,
+            if (mediaUrl != null) 'media_url': mediaUrl,
           }),
         );
       } finally {
         client.close();
       }
     } catch (_) {}
+  }
+
+  Future<Map<String, String>?> uploadVoice(
+      String filePath, double durationSec) async {
+    try {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${ApiConfig.baseUrl}/messages/voice'),
+      );
+      request.headers['Authorization'] =
+          'Bearer ${ApiConfig.token ?? ''}';
+      request.files
+          .add(await http.MultipartFile.fromPath('voice', filePath));
+      request.fields['duration'] = durationSec.toStringAsFixed(1);
+
+      final streamed = await request.send();
+      if (streamed.statusCode == 201) {
+        final body = await streamed.stream.bytesToString();
+        final data = jsonDecode(body) as Map<String, dynamic>;
+        final mediaUrl = data['media_url'] as String?;
+        final duration = data['duration'] as String?;
+        if (mediaUrl != null) {
+          return {
+            'media_url': mediaUrl,
+            'duration': duration ?? durationSec.toStringAsFixed(1),
+          };
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<bool> forwardMessage({
+    required String messageId,
+    required List<String> targetChatIds,
+  }) async {
+    try {
+      final client = http.Client();
+      try {
+        final response = await client.post(
+          Uri.parse('${ApiConfig.baseUrl}/messages/forward'),
+          headers: ApiConfig.headers,
+          body: jsonEncode({
+            'message_id': messageId,
+            'target_chat_ids': targetChatIds,
+          }),
+        );
+        return response.statusCode == 201;
+      } finally {
+        client.close();
+      }
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> editMessage(String messageId, String content) async {
@@ -154,6 +211,20 @@ class ChatProvider extends ChangeNotifier {
     return SearchMessagesResponse(results: []);
   }
 
+  Future<void> markDelivered(String messageId) async {
+    try {
+      final client = http.Client();
+      try {
+        await client.post(
+          Uri.parse('${ApiConfig.baseUrl}/messages/$messageId/delivered'),
+          headers: ApiConfig.headers,
+        );
+      } finally {
+        client.close();
+      }
+    } catch (_) {}
+  }
+
   Future<void> markRead(String messageId) async {
     try {
       final client = http.Client();
@@ -204,7 +275,28 @@ class ChatProvider extends ChangeNotifier {
       final msg = Message.fromJson(payload);
       final chatId = msg.chatId;
       _messages[chatId] = [msg, ...(_messages[chatId] ?? [])];
+
+      // Auto-mark incoming messages (from others) as delivered
+      if (currentUserId != null && msg.senderId != currentUserId) {
+        markDelivered(msg.id);
+      }
+
       notifyListeners();
+    } else if (type == 'message.status') {
+      final messageId = payload['message_id'] as String?;
+      final status = payload['status'] as String?;
+      if (messageId == null || status == null) return;
+
+      // Update status in all chat message lists
+      for (final entry in _messages.entries) {
+        final list = entry.value;
+        final index = list.indexWhere((m) => m.id == messageId);
+        if (index >= 0) {
+          list[index] = list[index].copyWith(status: status);
+          notifyListeners();
+          return;
+        }
+      }
     }
   }
 

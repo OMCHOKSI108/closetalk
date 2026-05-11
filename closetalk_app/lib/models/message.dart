@@ -8,6 +8,7 @@ class Message {
   final String? mediaUrl;
   final String? mediaId;
   final String? replyToId;
+  final String? forwardedFrom;
   final String status;
   final String? moderationStatus;
   final bool isDeleted;
@@ -25,6 +26,7 @@ class Message {
     this.mediaUrl,
     this.mediaId,
     this.replyToId,
+    this.forwardedFrom,
     this.status = 'sending',
     this.moderationStatus,
     this.isDeleted = false,
@@ -44,6 +46,7 @@ class Message {
       mediaUrl: json['media_url'] as String?,
       mediaId: json['media_id'] as String?,
       replyToId: json['reply_to_id'] as String?,
+      forwardedFrom: json['forwarded_from'] as String?,
       status: json['status'] as String? ?? 'sent',
       moderationStatus: json['moderation_status'] as String?,
       isDeleted: json['is_deleted'] as bool? ?? false,
@@ -68,6 +71,7 @@ class Message {
         'media_url': mediaUrl,
         'media_id': mediaId,
         'reply_to_id': replyToId,
+        'forwarded_from': forwardedFrom,
         'status': status,
         'moderation_status': moderationStatus,
         'is_deleted': isDeleted,
@@ -86,6 +90,7 @@ class Message {
     String? mediaUrl,
     String? mediaId,
     String? replyToId,
+    String? forwardedFrom,
     String? status,
     String? moderationStatus,
     bool? isDeleted,
@@ -103,6 +108,7 @@ class Message {
       mediaUrl: mediaUrl ?? this.mediaUrl,
       mediaId: mediaId ?? this.mediaId,
       replyToId: replyToId ?? this.replyToId,
+      forwardedFrom: forwardedFrom ?? this.forwardedFrom,
       status: status ?? this.status,
       moderationStatus: moderationStatus ?? this.moderationStatus,
       isDeleted: isDeleted ?? this.isDeleted,

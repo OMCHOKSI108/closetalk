@@ -463,6 +463,28 @@ func (s *DynamoDBStore) GetReactions(ctx context.Context, messageID uuid.UUID) (
 	return reactions, nil
 }
 
+func (s *DynamoDBStore) MarkDelivered(ctx context.Context, messageID uuid.UUID) error {
+	msg, err := s.GetMessage(ctx, messageID)
+	if err != nil {
+		return err
+	}
+	_, err = Dynamo.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: aws.String("closetalk-messages"),
+		Key: map[string]types.AttributeValue{
+			"chat_id":  &types.AttributeValueMemberS{Value: msg.ChatID},
+			"sort_key": &types.AttributeValueMemberS{Value: sortKeyFromTime(msg.CreatedAt, msg.ID)},
+		},
+		UpdateExpression: aws.String("SET #s = :st"),
+		ExpressionAttributeNames: map[string]string{
+			"#s": "status",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":st": &types.AttributeValueMemberS{Value: "delivered"},
+		},
+	})
+	return err
+}
+
 func (s *DynamoDBStore) MarkRead(ctx context.Context, messageID uuid.UUID, userID string) error {
 	item := dynamoRead{
 		MessageID: messageID.String(),

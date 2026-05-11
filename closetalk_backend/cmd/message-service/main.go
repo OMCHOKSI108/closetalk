@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -87,18 +89,29 @@ func main() {
 	// WebSocket endpoint for real-time messaging
 	r.Get("/ws", handleWebSocket)
 
+	// Serve uploaded voice files (public — UUID-based URLs are effectively private)
+	workDir, _ := os.Getwd()
+	voiceDir := filepath.Join(workDir, "uploads", "voice")
+	os.MkdirAll(voiceDir, 0755)
+	r.Get("/voice/*", func(w http.ResponseWriter, r *http.Request) {
+		http.StripPrefix("/voice/", http.FileServer(http.Dir(voiceDir))).ServeHTTP(w, r)
+	})
+
 	// Message REST API (JWT required)
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.RequireAuth)
 		r.Use(middleware.UserRateLimit)
 
 		r.Post("/messages", handleSendMessage)
+		r.Post("/messages/voice", handleUploadVoice)
+		r.Post("/messages/forward", handleForwardMessage)
 		r.Get("/messages/{chatId}", handleGetMessages)
 		r.Get("/messages/{chatId}/search", handleSearchMessages)
 		r.Put("/messages/{messageId}", handleEditMessage)
 		r.Delete("/messages/{messageId}", handleDeleteMessage)
 		r.Post("/messages/{messageId}/react", handleReactToMessage)
 		r.Post("/messages/{messageId}/read", handleMarkRead)
+		r.Post("/messages/{messageId}/delivered", handleMarkDelivered)
 
 		r.Post("/bookmarks", handleAddBookmark)
 		r.Delete("/bookmarks/{messageId}", handleRemoveBookmark)
@@ -356,8 +369,14 @@ func handleSendMessage(w http.ResponseWriter, r *http.Request) {
 			msg.ReplyToID = &id
 		}
 	}
+	if req.MediaURL != "" {
+		msg.MediaURL = req.MediaURL
+	}
 	if req.MediaID != "" {
 		msg.MediaID = req.MediaID
+	}
+	if req.ForwardedFrom != "" {
+		msg.ForwardedFrom = req.ForwardedFrom
 	}
 	if len(req.RecipientIDs) > 0 {
 		msg.RecipientIDs = req.RecipientIDs
@@ -379,7 +398,9 @@ func handleSendMessage(w http.ResponseWriter, r *http.Request) {
 			ID: msg.ID, ChatID: msg.ChatID, SenderID: msg.SenderID,
 			SenderUsername: usernames[userID],
 			Content:        msg.Content, ContentType: msg.ContentType,
-			Status: msg.Status, CreatedAt: msg.CreatedAt,
+			MediaURL: msg.MediaURL, MediaID: msg.MediaID,
+			ForwardedFrom: msg.ForwardedFrom,
+			Status:        msg.Status, CreatedAt: msg.CreatedAt,
 		},
 	})
 	hub.broadcastToChat(req.ChatID, wsPayload, userID)
@@ -395,7 +416,9 @@ func handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		ID: msg.ID, ChatID: msg.ChatID, SenderID: msg.SenderID,
 		SenderUsername: usernames[userID],
 		Content:        msg.Content, ContentType: msg.ContentType,
-		Status: msg.Status, CreatedAt: msg.CreatedAt,
+		MediaURL: msg.MediaURL, MediaID: msg.MediaID,
+		ForwardedFrom: msg.ForwardedFrom,
+		Status:        msg.Status, CreatedAt: msg.CreatedAt,
 	})
 }
 
@@ -445,7 +468,8 @@ func handleGetMessages(w http.ResponseWriter, r *http.Request) {
 			SenderUsername: usernames[msg.SenderID],
 			Content:        msg.Content, ContentType: msg.ContentType,
 			MediaURL: msg.MediaURL, MediaID: msg.MediaID,
-			ReplyToID: msg.ReplyToID, Status: msg.Status,
+			ReplyToID: msg.ReplyToID, ForwardedFrom: msg.ForwardedFrom,
+			Status:           msg.Status,
 			ModerationStatus: msg.ModerationStatus,
 			EditHistory:      msg.EditHistory,
 			IsDeleted:        msg.IsDeleted,
@@ -649,6 +673,13 @@ func handleMarkRead(w http.ResponseWriter, r *http.Request) {
 
 	database.GlobalStore.MarkRead(context.Background(), messageID, userID)
 
+	// Also update the message status to 'read' in the store
+	readMsg, readErr := database.GlobalStore.GetMessage(context.Background(), messageID)
+	if readErr == nil && readMsg.Status != "read" {
+		readMsg.Status = "read"
+		database.GlobalStore.UpdateMessage(context.Background(), readMsg)
+	}
+
 	wsPayload, _ := json.Marshal(model.WebSocketMessage{
 		Type: "message.status",
 		Payload: map[string]string{
@@ -658,12 +689,42 @@ func handleMarkRead(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 
-	msg, err := database.GlobalStore.GetMessage(context.Background(), messageID)
-	if err == nil {
-		hub.broadcastToChat(msg.ChatID, wsPayload, userID)
+	chatMsg, chatErr := database.GlobalStore.GetMessage(context.Background(), messageID)
+	if chatErr == nil {
+		hub.broadcastToChat(chatMsg.ChatID, wsPayload, userID)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "read"})
+}
+
+func handleMarkDelivered(w http.ResponseWriter, r *http.Request) {
+	messageIDStr := chi.URLParam(r, "messageId")
+	messageID, err := uuid.Parse(messageIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION", "invalid message_id")
+		return
+	}
+
+	err = database.GlobalStore.MarkDelivered(context.Background(), messageID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to mark delivered")
+		return
+	}
+
+	wsPayload, _ := json.Marshal(model.WebSocketMessage{
+		Type: "message.status",
+		Payload: map[string]string{
+			"message_id": messageIDStr,
+			"status":     "delivered",
+		},
+	})
+
+	msg, err := database.GlobalStore.GetMessage(context.Background(), messageID)
+	if err == nil {
+		hub.broadcastToChat(msg.ChatID, wsPayload, "")
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "delivered"})
 }
 
 func handleSearchMessages(w http.ResponseWriter, r *http.Request) {
@@ -733,6 +794,172 @@ func handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 		Results:    results,
 		NextCursor: nextCursor,
 		HasMore:    hasMore,
+	})
+}
+
+func handleForwardMessage(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+
+	var req model.ForwardMessageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+		return
+	}
+
+	if req.MessageID == "" || len(req.TargetChatIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "VALIDATION", "message_id and target_chat_ids are required")
+		return
+	}
+
+	messageID, err := uuid.Parse(req.MessageID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION", "invalid message_id")
+		return
+	}
+
+	ctx := context.Background()
+	original, err := database.GlobalStore.GetMessage(ctx, messageID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "Message not found")
+		return
+	}
+
+	// Resolve original sender's username
+	usernames := getUsernames(ctx, []string{original.SenderID, userID})
+	forwardedFrom := usernames[original.SenderID]
+	if forwardedFrom == "" {
+		forwardedFrom = original.SenderID
+	}
+
+	now := time.Now()
+	results := make([]model.MessageResponse, 0, len(req.TargetChatIDs))
+
+	for _, chatID := range req.TargetChatIDs {
+		if chatID == "" {
+			continue
+		}
+
+		newMsg := &model.Message{
+			ID:            uuid.New(),
+			ChatID:        chatID,
+			SenderID:      userID,
+			Content:       original.Content,
+			ContentType:   original.ContentType,
+			MediaURL:      original.MediaURL,
+			MediaID:       original.MediaID,
+			ForwardedFrom: forwardedFrom,
+			Status:        "sent",
+			CreatedAt:     now,
+		}
+
+		if err := database.GlobalStore.InsertMessage(ctx, newMsg); err != nil {
+			log.Printf("[forward] insert error for chat %s: %v", chatID, err)
+			continue
+		}
+
+		resp := model.MessageResponse{
+			ID: newMsg.ID, ChatID: newMsg.ChatID, SenderID: newMsg.SenderID,
+			SenderUsername: usernames[userID],
+			Content:        newMsg.Content, ContentType: newMsg.ContentType,
+			MediaURL: newMsg.MediaURL, MediaID: newMsg.MediaID,
+			ForwardedFrom: forwardedFrom,
+			Status:        newMsg.Status, CreatedAt: newMsg.CreatedAt,
+		}
+
+		// Broadcast via WebSocket to target chat
+		wsPayload, _ := json.Marshal(model.WebSocketMessage{
+			Type:    "message.new",
+			Payload: resp,
+		})
+		hub.broadcastToChat(chatID, wsPayload, userID)
+		// Also broadcast to sender's other devices
+		hub.broadcastToUserDevices(userID, wsPayload, "")
+
+		results = append(results, resp)
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"messages": results,
+	})
+}
+
+func handleUploadVoice(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "user not found")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "file too large or invalid multipart")
+		return
+	}
+
+	file, header, err := r.FormFile("voice")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION", "voice file is required")
+		return
+	}
+	defer file.Close()
+
+	contentType := header.Header.Get("Content-Type")
+	validTypes := map[string]bool{
+		"audio/webm":  true,
+		"audio/mp4":   true,
+		"audio/ogg":   true,
+		"audio/wav":   true,
+		"audio/x-wav": true,
+		"audio/mpeg":  true,
+	}
+	if !validTypes[contentType] {
+		writeError(w, http.StatusBadRequest, "VALIDATION", "unsupported audio format")
+		return
+	}
+
+	duration := r.FormValue("duration")
+	if duration == "" {
+		duration = "0"
+	}
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL", "failed to read file")
+		return
+	}
+
+	workDir, _ := os.Getwd()
+	voiceDir := filepath.Join(workDir, "uploads", "voice")
+	os.MkdirAll(voiceDir, 0755)
+
+	ext := filepath.Ext(header.Filename)
+	if ext == "" {
+		switch contentType {
+		case "audio/webm":
+			ext = ".webm"
+		case "audio/mp4":
+			ext = ".mp4"
+		case "audio/ogg":
+			ext = ".ogg"
+		case "audio/wav", "audio/x-wav":
+			ext = ".wav"
+		case "audio/mpeg":
+			ext = ".mp3"
+		default:
+			ext = ".webm"
+		}
+	}
+
+	filename := uuid.New().String() + ext
+	filePath := filepath.Join(voiceDir, filename)
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL", "failed to save file")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]string{
+		"media_url": "/voice/" + filename,
+		"duration":  duration,
 	})
 }
 
@@ -911,7 +1138,8 @@ func handleSyncMessages(w http.ResponseWriter, r *http.Request) {
 			SenderUsername: usernames[msg.SenderID],
 			Content:        msg.Content, ContentType: msg.ContentType,
 			MediaURL: msg.MediaURL, MediaID: msg.MediaID,
-			ReplyToID: msg.ReplyToID, Status: msg.Status,
+			ReplyToID: msg.ReplyToID, ForwardedFrom: msg.ForwardedFrom,
+			Status:           msg.Status,
 			ModerationStatus: msg.ModerationStatus,
 			EditHistory:      msg.EditHistory,
 			IsDeleted:        msg.IsDeleted,
