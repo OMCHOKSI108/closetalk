@@ -20,12 +20,12 @@ class MessageService {
     String? mediaId,
     String? replyToId,
   }) async {
-    final body = {
+    final body = <String, dynamic>{
       'chat_id': chatId,
       'content': content,
       'content_type': contentType,
-      if (mediaId != null) 'media_id': mediaId,
-      if (replyToId != null) 'reply_to_id': replyToId,
+      ?(mediaId == null ? null : 'media_id'): mediaId!,
+      ?(replyToId == null ? null : 'reply_to_id'): replyToId!,
     };
 
     final response = await http.post(
@@ -45,9 +45,9 @@ class MessageService {
     String? cursor,
     int limit = 50,
   }) async {
-    final queryParams = {
+    final queryParams = <String, String>{
       'limit': limit.toString(),
-      if (cursor != null) 'cursor': cursor,
+      ?(cursor == null ? null : 'cursor'): cursor!,
     };
     final uri = Uri.parse('$baseUrl/messages/$chatId')
         .replace(queryParameters: queryParams);

@@ -31,8 +31,8 @@ class SyncService {
     try {
       final uri = Uri.parse('$baseUrl/sync/messages').replace(
         queryParameters: {
-          if (_lastCursor != null) 'after': _lastCursor,
           'limit': limit.toString(),
+          ?(_lastCursor == null ? null : 'after'): _lastCursor!,
         },
       );
 

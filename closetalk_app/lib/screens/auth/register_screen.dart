@@ -90,7 +90,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           child: Column(
             children: [
               Consumer<AuthProvider>(
-                builder: (_, auth, __) {
+                builder: (_, auth, _) {
                   if (auth.error != null) {
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 16),
@@ -159,7 +159,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
               const SizedBox(height: 24),
               Consumer<AuthProvider>(
-                builder: (_, auth, __) => SizedBox(
+                builder: (_, auth, _) => SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
                     onPressed: auth.status == AuthStatus.loading

@@ -104,18 +104,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _loadMore() async {
+    if (!mounted) return;
     setState(() => _isLoadingMore = true);
-    await context.read<ChatProvider>().fetchMessages(widget.chatId);
+    final chatProvider = context.read<ChatProvider>();
+    await chatProvider.fetchMessages(widget.chatId);
+    if (!mounted) return;
     setState(() => _isLoadingMore = false);
   }
 
   Future<void> _initE2EE() async {
     final e2ee = context.read<E2EEProvider>();
+    final contacts = context.read<ContactProvider>().contacts;
     await e2ee.init();
     if (e2ee.enabled) {
       String? peerId = widget.peerUserId;
       if (peerId == null && widget.groupId == null) {
-        final contacts = context.read<ContactProvider>().contacts;
         for (final c in contacts) {
           if (c.conversationId == widget.chatId) {
             peerId = c.contactId;
@@ -126,25 +129,26 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       if (peerId != null && !e2ee.hasSessionKey(widget.chatId)) {
         await e2ee.getOrCreateSessionKey(peerId);
       }
-      if (mounted) setState(() => _e2eeEnabled = e2ee.enabled && e2ee.hasSessionKey(widget.chatId));
+      if (!mounted) return;
+      setState(
+          () => _e2eeEnabled = e2ee.enabled && e2ee.hasSessionKey(widget.chatId));
     }
   }
 
   Future<void> _enableE2EE() async {
     final e2ee = context.read<E2EEProvider>();
+    final contacts = context.read<ContactProvider>().contacts;
     await e2ee.init();
     final ok = await e2ee.enable();
     if (!ok) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to enable E2EE')),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to enable E2EE')),
+      );
       return;
     }
     String? peerId = widget.peerUserId;
     if (peerId == null && widget.groupId == null) {
-      final contacts = context.read<ContactProvider>().contacts;
       for (final c in contacts) {
         if (c.conversationId == widget.chatId) {
           peerId = c.contactId;
@@ -155,18 +159,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (peerId != null) {
       final key = await e2ee.getOrCreateSessionKey(peerId);
       if (key != null) {
-        if (mounted) setState(() => _e2eeEnabled = true);
+        if (!mounted) return;
+        setState(() => _e2eeEnabled = true);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('End-to-end encryption enabled')),
         );
         return;
       }
     }
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Contact has not enabled E2EE yet')),
-      );
-    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Contact has not enabled E2EE yet')),
+    );
   }
 
   Future<void> _loadMuted() async {
@@ -297,6 +301,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       folder: 'uploads/images',
     );
 
+    if (!mounted) return;
+
     if (result.isSuccess && result.mediaUrl != null) {
       context.read<ChatProvider>().sendMessage(
             chatId: widget.chatId,
@@ -305,11 +311,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             mediaUrl: result.mediaUrl,
           );
     } else {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Upload failed: ${result.error ?? "unknown error"}')),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content:
+                Text('Upload failed: ${result.error ?? "unknown error"}')),
+      );
     }
   }
 
@@ -324,6 +330,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           final question = poll['question'] as String;
           final options = (poll['options'] as List).cast<String>();
 
+          final chatProvider = context.read<ChatProvider>();
           final pp = context.read<PollProvider>();
           final pollId = await pp.createPoll(
             chatId: widget.chatId,
@@ -331,7 +338,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             options: options,
           );
 
-          context.read<ChatProvider>().sendMessage(
+          if (!mounted) return;
+
+          chatProvider.sendMessage(
                 chatId: widget.chatId,
                 content: jsonEncode({
                   'poll_id': pollId,
@@ -501,7 +510,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => Consumer<GroupProvider>(
-          builder: (_, gp, __) {
+          builder: (_, gp, _) {
             final grp = gp.currentGroup;
             return GroupInfoScreen(
               group: grp ??
@@ -689,7 +698,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       children: [
         Expanded(
           child: Consumer<ChatProvider>(
-            builder: (_, chat, __) {
+            builder: (_, chat, _) {
               final messages = chat.getMessages(widget.chatId);
               if (messages.isEmpty) {
                 return const Center(child: Text('No messages yet'));
@@ -744,7 +753,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           ),
         ),
         Consumer<ChatProvider>(
-          builder: (_, chat, __) {
+          builder: (_, chat, _) {
             final typing = chat.typingUsers(widget.chatId)
                 .where((uid) => uid != userId)
                 .toList();

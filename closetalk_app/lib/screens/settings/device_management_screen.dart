@@ -121,7 +121,7 @@ class _DeviceManagementScreenState extends State<DeviceManagementScreen> {
               : ListView.separated(
                   padding: const EdgeInsets.all(16),
                   itemCount: _devices.length,
-                  separatorBuilder: (_, __) => const Divider(),
+                  separatorBuilder: (_, _) => const Divider(),
                   itemBuilder: (context, index) {
                     final device = _devices[index];
                     return ListTile(

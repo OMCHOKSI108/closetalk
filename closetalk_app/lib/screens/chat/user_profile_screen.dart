@@ -107,6 +107,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   }
 
   Future<void> _removeFriend() async {
+    final cp = context.read<ContactProvider>();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -124,19 +125,18 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         ],
       ),
     );
-    if (confirmed == true) {
-      final cp = context.read<ContactProvider>();
-      await cp.rejectContactRequest(widget.userId);
-      if (mounted) {
-        setState(() => _contactStatus = null);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Friend removed')),
-        );
-      }
-    }
+    if (!mounted) return;
+    if (confirmed != true) return;
+    await cp.rejectContactRequest(widget.userId);
+    if (!mounted) return;
+    setState(() => _contactStatus = null);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Friend removed')),
+    );
   }
 
   Future<void> _blockUser() async {
+    final cp = context.read<ContactProvider>();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -155,19 +155,18 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         ],
       ),
     );
-    if (confirmed == true) {
-      final cp = context.read<ContactProvider>();
-      await cp.blockUser(widget.userId);
-      if (mounted) {
-        setState(() => _contactStatus = 'blocked');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('User blocked')),
-        );
-      }
-    }
+    if (!mounted) return;
+    if (confirmed != true) return;
+    await cp.blockUser(widget.userId);
+    if (!mounted) return;
+    setState(() => _contactStatus = 'blocked');
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('User blocked')),
+    );
   }
 
   Future<void> _reportUser() async {
+    final cp = context.read<ContactProvider>();
     final reasonCtl = TextEditingController();
     final reason = await showDialog<String>(
       context: context,
@@ -194,32 +193,28 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         ],
       ),
     );
-    if (reason != null && reason.isNotEmpty) {
-      final cp = context.read<ContactProvider>();
-      await cp.reportUser(widget.userId, reason);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('User reported')),
-        );
-      }
-    }
+    if (!mounted) return;
+    if (reason == null || reason.isEmpty) return;
+    await cp.reportUser(widget.userId, reason);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('User reported')),
+    );
   }
 
   Future<void> _sendMessage() async {
     final cp = context.read<ContactProvider>();
     final conv = await cp.createDirectConversation(widget.userId);
-    if (mounted && conv != null) {
-      if (!mounted) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ChatDetailScreen(
-            chatId: conv.chatId,
-            chatTitle: widget.displayName,
-          ),
+    if (!mounted || conv == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatDetailScreen(
+          chatId: conv.chatId,
+          chatTitle: widget.displayName,
         ),
-      );
-    }
+      ),
+    );
   }
 
   @override

@@ -36,7 +36,7 @@ class _GroupListScreenState extends State<GroupListScreen> {
 
     return Scaffold(
       body: Consumer<GroupProvider>(
-        builder: (_, gp, __) {
+        builder: (_, gp, _) {
           if (gp.isLoading && gp.groups.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }

@@ -97,7 +97,7 @@ class PrivacyProvider extends ChangeNotifier {
         req.headers.set('Authorization', 'Bearer ${ApiConfig.token}');
         req.write(jsonEncode(updates));
         final resp = await req.close();
-        final body = await resp.transform(utf8.decoder).join();
+        await resp.drain();
 
         if (resp.statusCode == 200) {
           await loadSettings();

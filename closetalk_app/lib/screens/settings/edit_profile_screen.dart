@@ -103,10 +103,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       maxHeight: 512,
     );
     if (picked == null) return;
+    if (!mounted) return;
 
     setState(() => _isLoading = true);
 
     try {
+      final auth = context.read<AuthProvider>();
       final client = HttpClient();
       try {
         final req = await client.putUrl(
@@ -137,31 +139,28 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         if (resp.statusCode == 200) {
           final data = jsonDecode(responseBody) as Map<String, dynamic>;
           final avatarUrl = data['avatar_url'] as String;
-          final auth = context.read<AuthProvider>();
           await auth.updateProfile(avatarUrl: avatarUrl);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Avatar updated')),
-            );
-          }
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Avatar updated')),
+          );
         } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Failed to upload avatar')),
-            );
-          }
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to upload avatar')),
+          );
         }
       } finally {
         client.close();
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
     }
 
+    if (!mounted) return;
     setState(() => _isLoading = false);
   }
 

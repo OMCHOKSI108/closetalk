@@ -516,7 +516,7 @@ class AuthProvider extends ChangeNotifier {
         req.write(jsonEncode({
           'token': token,
           'platform': platform,
-          if (deviceId != null) 'device_id': deviceId,
+          ?(deviceId == null ? null : 'device_id'): deviceId!,
         }));
         final resp = await req.close();
         return resp.statusCode == 200;

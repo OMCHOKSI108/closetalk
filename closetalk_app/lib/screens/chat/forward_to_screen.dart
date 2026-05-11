@@ -56,7 +56,7 @@ class _ForwardToScreenState extends State<ForwardToScreen> {
         title: const Text('Forward to...'),
       ),
       body: Consumer<ContactProvider>(
-        builder: (_, cp, __) {
+        builder: (_, cp, _) {
           if (cp.isLoading) {
             return const Center(child: CircularProgressIndicator());
           }

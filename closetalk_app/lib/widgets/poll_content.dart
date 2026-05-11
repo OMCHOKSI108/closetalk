@@ -139,7 +139,7 @@ class _PollContentState extends State<PollContent> {
             );
           }),
           Text(
-            '${total} vote${total == 1 ? '' : 's'}${_iVoted ? ' · You voted' : ''}',
+            '$total vote${total == 1 ? '' : 's'}${_iVoted ? ' · You voted' : ''}',
             style: TextStyle(fontSize: 11, color: Colors.grey[500]),
           ),
         ],

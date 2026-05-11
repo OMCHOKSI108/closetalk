@@ -209,7 +209,7 @@ class SettingsScreen extends StatelessWidget {
               ],
               const Divider(height: 1),
               Consumer<ThemeProvider>(
-                builder: (_, theme, __) => SwitchListTile(
+                builder: (_, theme, _) => SwitchListTile(
                   secondary: Icon(
                     theme.isDark ? Icons.dark_mode : Icons.light_mode,
                   ),

@@ -1,9 +1,7 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../services/message_service.dart';
-import '../../services/api_config.dart';
 import 'channel_admin_screen.dart';
 
 class ChannelScreen extends StatefulWidget {

@@ -230,7 +230,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     final data = await sp.getStoryViews(storyId);
     final views = data['views'] as List<dynamic>;
 
-    if (!context.mounted) return;
+    if (!mounted) return;
     showModalBottomSheet(
       context: context,
       builder: (_) => SafeArea(
@@ -305,15 +305,16 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
         ],
       ),
     );
+    if (!mounted) return;
     if (replied != true) return;
     final text = controller.text.trim();
     if (text.isEmpty) return;
-    final ok = await context.read<StoryProvider>().replyToStory(storyId, text);
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(ok ? 'Reply sent!' : 'Failed to send reply')),
-      );
-    }
+    final sp = context.read<StoryProvider>();
+    final ok = await sp.replyToStory(storyId, text);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(ok ? 'Reply sent!' : 'Failed to send reply')),
+    );
   }
 
   @override

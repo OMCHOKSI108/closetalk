@@ -42,7 +42,7 @@ class _BookmarkListScreenState extends State<BookmarkListScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Bookmarks')),
       body: Consumer<BookmarkProvider>(
-        builder: (_, bp, __) {
+        builder: (_, bp, _) {
           if (bp.isLoading && bp.bookmarks.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }

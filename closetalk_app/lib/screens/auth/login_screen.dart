@@ -68,20 +68,20 @@ class _LoginScreenState extends State<LoginScreen> {
             onPressed: () async {
               final input = inputCtl.text.trim();
               if (input.isEmpty) return;
-              final auth = context.read<AuthProvider>();
+              final authProvider = context.read<AuthProvider>();
               if (input.contains('@')) {
-                await auth.sendRecoveryEmail(input);
-                if (ctx.mounted) {
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('Recovery email sent if account exists')),
-                  );
-                }
+                await authProvider.sendRecoveryEmail(input);
+                if (!mounted) return;
+                if (ctx.mounted) Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                      content: Text('Recovery email sent if account exists')),
+                );
               } else {
-                await auth.recoverWithCode(input);
-                if (mounted && auth.status == AuthStatus.authenticated) {
-                  Navigator.pop(ctx);
+                await authProvider.recoverWithCode(input);
+                if (!mounted) return;
+                if (authProvider.status == AuthStatus.authenticated) {
+                  if (ctx.mounted) Navigator.pop(ctx);
                   Navigator.pushReplacement(
                     context,
                     MaterialPageRoute(builder: (_) => const HomeScreen()),
@@ -99,12 +99,14 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _googleLogin() async {
     try {
       final googleSignIn = GoogleSignIn();
+      final authProvider = context.read<AuthProvider>();
       final account = await googleSignIn.signIn();
       if (account == null) return;
       final auth = await account.authentication;
       if (auth.idToken == null) return;
-      await context.read<AuthProvider>().googleLogin(idToken: auth.idToken!);
-      if (mounted && context.read<AuthProvider>().status == AuthStatus.authenticated) {
+      await authProvider.googleLogin(idToken: auth.idToken!);
+      if (!mounted) return;
+      if (authProvider.status == AuthStatus.authenticated) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const HomeScreen()),
@@ -183,7 +185,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         fontSize: 28, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 32),
                 Consumer<AuthProvider>(
-                  builder: (_, auth, __) {
+                  builder: (_, auth, _) {
                     if (auth.error != null) {
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 16),
@@ -223,7 +225,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 24),
                 Consumer<AuthProvider>(
-                  builder: (_, auth, __) => SizedBox(
+                  builder: (_, auth, _) => SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed:

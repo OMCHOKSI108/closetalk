@@ -131,10 +131,11 @@ class ChatProvider extends ChangeNotifier {
             'chat_id': chatId,
             'content': finalContent,
             'content_type': finalContentType,
-            if (replyToId != null) 'reply_to_id': replyToId,
-            if (mediaId != null) 'media_id': mediaId,
-            if (mediaUrl != null) 'media_url': mediaUrl,
-            if (disappearAfter != null) 'disappear_after': disappearAfter,
+            ?(replyToId == null ? null : 'reply_to_id'): replyToId!,
+            ?(mediaId == null ? null : 'media_id'): mediaId!,
+            ?(mediaUrl == null ? null : 'media_url'): mediaUrl!,
+            ?(disappearAfter == null ? null : 'disappear_after'):
+                disappearAfter!,
           }),
         );
       } finally {

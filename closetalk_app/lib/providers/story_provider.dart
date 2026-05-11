@@ -55,7 +55,7 @@ class StoryProvider extends ChangeNotifier {
         headers: ApiConfig.headers,
         body: jsonEncode({
           'content': content,
-          if (mediaUrl != null) 'media_url': mediaUrl,
+          ?(mediaUrl == null ? null : 'media_url'): mediaUrl!,
           'media_type': mediaType,
         }),
       );

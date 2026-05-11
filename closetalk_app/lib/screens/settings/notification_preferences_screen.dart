@@ -102,20 +102,22 @@ class _NotificationPreferencesScreenState
                   initialTime: _quietStart,
                   helpText: 'Select quiet hours start',
                 );
-                if (picked != null) {
-                  final pickedEnd = await showTimePicker(
-                    context: context,
-                    initialTime: _quietEnd,
-                    helpText: 'Select quiet hours end',
-                  );
-                  if (pickedEnd != null) {
-                    setState(() {
-                      _quietStart = picked;
-                      _quietEnd = pickedEnd;
-                    });
-                    _saveQuietHours();
-                  }
-                }
+                if (!context.mounted) return;
+                if (picked == null) return;
+
+                final pickedEnd = await showTimePicker(
+                  context: context,
+                  initialTime: _quietEnd,
+                  helpText: 'Select quiet hours end',
+                );
+                if (!context.mounted) return;
+                if (pickedEnd == null) return;
+
+                setState(() {
+                  _quietStart = picked;
+                  _quietEnd = pickedEnd;
+                });
+                _saveQuietHours();
               },
             ),
           ],
