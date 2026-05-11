@@ -159,46 +159,6 @@ closetalk/
 ```
 
 
-//////
-CORE MESSAGING (7)
-  ✅ 1. Real-time 1-to-1 & group chats
-  ✅ 2. Multi-device sync
-  🔶 3. Offline drafts / guaranteed delivery — status tracking done, no offline queue or draft saving
-  🔶 4. Message editing/unsend — backend done, Flutter missing "(edited)" label and visual unsend
-  🔶 5. Read receipts / typing — receipts done, no "User is typing..." UI
-  ❌ 6. Rich text formatting
-  🔶 7. In-chat search — text-only substring, no date/media/sender filters
-UX & USABILITY (7)
-  ✅ 8. Minimal clean interface
-  🔶 9. Dark/light mode — light theme done, no dark theme
-  🔶 10. Pin chats/messages — group message pinning only, no chat-level pinning
-  ❌ 11. Chat filters (unread/starred/personal vs group)
-  ❌ 12. Mute/quiet hours
-  ❌ 13. Compact mode / side-panel layout
-  🔶 14. Quick-access shortcuts — voice + image attach, no emoji/GIF/video/file
-PRIVACY & SECURITY (6)
-  🔶 15. E2E encryption — schema has e2ee_enabled/public_key, no actual encryption
-  🔶 16. Self-destructing messages — schema has disappeared_at, no TTL enforcement
-  🔶 17. Disappearing chats — schema exists, no enforcement
-  ❌ 18. Hide last seen/status per contact — schema exists, never enforced
-  ❌ 19. App lock (PIN/biometrics)
-  ✅ 20. Device management / remote logout
-MEDIA & CONTENT (6)
-  🔶 21. Image/video/audio/GIF/file sharing — image + voice only
-  🔶 22. Inline previews — image + voice, no video/document
-  ❌ 23. Document viewing
-  ❌ 24. File search / common-files per chat
-  ❌ 25. Stickers/GIFs/emoji packs
-  ✅ 26. Message reactions
-VOICE, VIDEO & CALLS (3) — ❌ ALL MISSING
-  27. Voice/video calls  28. Screen sharing  29. Call indicators
-COLLABORATION (5) — ❌ ALL MISSING
-  30. Tasks/notes  31. Polls  32. Bots  33. Workspaces  34. Shared lists
-SOCIAL & DISCOVERY (5)
-  ❌ 35. Status lines  36. Stories  38. Nearby discovery
-  🔶 37. Public communities — public groups exist, no discovery/browsing
-  🔶 39. People search — username only, no interests/tags
-//////
 
 ## Documentation
 
