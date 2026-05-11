@@ -243,6 +243,16 @@ class MessageBubble extends StatelessWidget {
                       message.contentType.isEmpty)
                     Text(message.content,
                         style: const TextStyle(fontSize: 15)),
+                  if (message.contentType == 'e2ee')
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.lock, size: 12, color: Colors.grey[500]),
+                        const SizedBox(width: 4),
+                        Text('Encrypted message',
+                            style: TextStyle(fontSize: 13, color: Colors.grey[500], fontStyle: FontStyle.italic)),
+                      ],
+                    ),
                   if (message.contentType == 'image' &&
                       message.content.isNotEmpty)
                     ClipRRect(

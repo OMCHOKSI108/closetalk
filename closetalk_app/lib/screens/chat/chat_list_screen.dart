@@ -251,15 +251,26 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                   ),
                               ],
                             ),
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ChatDetailScreen(
-                                  chatId: conv.chatId,
-                                  chatTitle: title,
+                            onTap: () {
+                              String? peerId;
+                              final contacts = context.read<ContactProvider>().contacts;
+                              for (final c in contacts) {
+                                if (c.conversationId == conv.chatId) {
+                                  peerId = c.contactId;
+                                  break;
+                                }
+                              }
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => ChatDetailScreen(
+                                    chatId: conv.chatId,
+                                    chatTitle: title,
+                                    peerUserId: peerId,
+                                  ),
                                 ),
-                              ),
-                            ),
+                              );
+                            },
                             onLongPress: () {
                               final cp =
                                   context.read<ChatProvider>();

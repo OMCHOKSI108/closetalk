@@ -251,6 +251,13 @@ func RunMigrations() error {
 		)`,
 
 		`CREATE INDEX IF NOT EXISTS idx_reports_reported ON reports(reported_user_id)`,
+
+		`CREATE TABLE IF NOT EXISTS e2ee_keys (
+			user_id     UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			public_key  TEXT NOT NULL,
+			created_at  TIMESTAMPTZ DEFAULT now(),
+			updated_at  TIMESTAMPTZ DEFAULT now()
+		)`,
 	}
 
 	for _, m := range migrations {

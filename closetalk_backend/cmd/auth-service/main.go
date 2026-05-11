@@ -263,6 +263,14 @@ func main() {
 		r.Delete("/stories/{id}", handleDeleteStory)
 	})
 
+	// E2EE key routes (JWT required)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+		r.Use(middleware.UserRateLimit)
+		r.Post("/e2ee/keys", handleRegisterE2EEKey)
+		r.Get("/e2ee/keys/{userId}", handleGetE2EEKey)
+	})
+
 	// Start server
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -2538,4 +2546,64 @@ func handleDeleteStory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// --- E2EE Key Handlers ---------------------------------------------------------
+
+type e2eeKeyRequest struct {
+	PublicKey string `json:"public_key"`
+}
+
+func handleRegisterE2EEKey(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+
+	var req e2eeKeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, model.ErrInvalidRequest)
+		return
+	}
+	if req.PublicKey == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "public_key is required"})
+		return
+	}
+
+	ctx := context.Background()
+	_, err := database.Pool.Exec(ctx,
+		`INSERT INTO e2ee_keys (user_id, public_key)
+		 VALUES ($1, $2)
+		 ON CONFLICT (user_id)
+		 DO UPDATE SET public_key = $2, updated_at = now()`,
+		userID, req.PublicKey,
+	)
+	if err != nil {
+		log.Printf("[e2ee] upsert error: %v", err)
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to store key"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func handleGetE2EEKey(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "userId")
+	if userID == "" {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "user_id is required"})
+		return
+	}
+
+	ctx := context.Background()
+	var publicKey string
+	err := database.Pool.QueryRow(ctx,
+		`SELECT public_key FROM e2ee_keys WHERE user_id = $1`,
+		userID,
+	).Scan(&publicKey)
+	if err != nil {
+		writeError(w, http.StatusNotFound, &model.AppError{Code: "NOT_FOUND", Message: "no e2ee key found for user"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"user_id":    userID,
+		"public_key": publicKey,
+	})
 }

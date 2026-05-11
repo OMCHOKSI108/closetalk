@@ -12,6 +12,8 @@ import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/call_provider.dart';
 import '../../providers/group_provider.dart';
+import '../../providers/e2ee_provider.dart';
+import '../../providers/contact_provider.dart';
 import '../../services/group_service.dart';
 import '../../services/api_config.dart';
 import '../../widgets/message_bubble.dart';
@@ -28,12 +30,14 @@ class ChatDetailScreen extends StatefulWidget {
   final String chatId;
   final String chatTitle;
   final String? groupId;
+  final String? peerUserId;
 
   const ChatDetailScreen({
     super.key,
     required this.chatId,
     this.chatTitle = '',
     this.groupId,
+    this.peerUserId,
   });
 
   @override
@@ -57,17 +61,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   Timer? _typingDebounce;
   bool _isMuted = false;
+  bool _e2eeEnabled = false;
 
   @override
   void initState() {
     super.initState();
     _loadMuted();
     final chat = context.read<ChatProvider>();
+    final e2ee = context.read<E2EEProvider>();
+    chat.setE2EE(e2ee);
     final userId = context.read<AuthProvider>().user?.id;
     chat.currentUserId = userId;
     chat.fetchMessages(widget.chatId, refresh: true);
     chat.connectWebSocket(widget.chatId);
     chat.markChatRead(widget.chatId);
+    _initE2EE();
 
     _scrollController.addListener(() {
       if (_scrollController.position.pixels <= 100 && !_isLoadingMore) {
@@ -98,6 +106,66 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     setState(() => _isLoadingMore = true);
     await context.read<ChatProvider>().fetchMessages(widget.chatId);
     setState(() => _isLoadingMore = false);
+  }
+
+  Future<void> _initE2EE() async {
+    final e2ee = context.read<E2EEProvider>();
+    await e2ee.init();
+    if (e2ee.enabled) {
+      String? peerId = widget.peerUserId;
+      if (peerId == null && widget.groupId == null) {
+        final contacts = context.read<ContactProvider>().contacts;
+        for (final c in contacts) {
+          if (c.conversationId == widget.chatId) {
+            peerId = c.contactId;
+            break;
+          }
+        }
+      }
+      if (peerId != null && !e2ee.hasSessionKey(widget.chatId)) {
+        await e2ee.getOrCreateSessionKey(peerId);
+      }
+      if (mounted) setState(() => _e2eeEnabled = e2ee.enabled && e2ee.hasSessionKey(widget.chatId));
+    }
+  }
+
+  Future<void> _enableE2EE() async {
+    final e2ee = context.read<E2EEProvider>();
+    await e2ee.init();
+    final ok = await e2ee.enable();
+    if (!ok) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to enable E2EE')),
+        );
+      }
+      return;
+    }
+    String? peerId = widget.peerUserId;
+    if (peerId == null && widget.groupId == null) {
+      final contacts = context.read<ContactProvider>().contacts;
+      for (final c in contacts) {
+        if (c.conversationId == widget.chatId) {
+          peerId = c.contactId;
+          break;
+        }
+      }
+    }
+    if (peerId != null) {
+      final key = await e2ee.getOrCreateSessionKey(peerId);
+      if (key != null) {
+        if (mounted) setState(() => _e2eeEnabled = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('End-to-end encryption enabled')),
+        );
+        return;
+      }
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Contact has not enabled E2EE yet')),
+      );
+    }
   }
 
   Future<void> _loadMuted() async {
@@ -507,6 +575,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               tooltip: _isMuted ? 'Unmute' : 'Mute',
               onPressed: _toggleMute,
             ),
+            if (widget.groupId == null)
+              IconButton(
+                icon: Icon(
+                  _e2eeEnabled ? Icons.lock : Icons.lock_open,
+                  color: _e2eeEnabled ? Colors.green : Colors.grey,
+                ),
+                tooltip: _e2eeEnabled ? 'E2EE enabled' : 'Enable E2EE',
+                onPressed: _enableE2EE,
+              ),
             IconButton(
               icon: const Icon(Icons.refresh),
               onPressed: () => context

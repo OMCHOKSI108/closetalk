@@ -5,6 +5,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:http/http.dart' as http;
 import '../models/message.dart';
 import '../services/api_config.dart';
+import 'e2ee_provider.dart';
 
 class ChatProvider extends ChangeNotifier {
   final Map<String, List<Message>> _messages = {};
@@ -21,6 +22,9 @@ class ChatProvider extends ChangeNotifier {
   List<Message> getMessages(String chatId) => _messages[chatId] ?? [];
   bool hasMore(String chatId) => _hasMore[chatId] ?? true;
   bool get isConnected => _isConnected;
+  E2EEProvider? _e2ee;
+
+  void setE2EE(E2EEProvider e2ee) => _e2ee = e2ee;
   bool isChatPinned(String chatId) => _pinnedChats[chatId] ?? false;
   List<String> get pinnedChatIds => _pinnedChats.entries
       .where((e) => e.value)
@@ -76,9 +80,18 @@ class ChatProvider extends ChangeNotifier {
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body) as Map<String, dynamic>;
           final paginated = PaginatedMessages.fromJson(data);
+          final decrypted = <Message>[];
+          for (final msg in paginated.messages) {
+            if (_e2ee != null && _e2ee!.enabled && msg.contentType == 'e2ee' && _e2ee!.hasSessionKey(msg.chatId)) {
+              final plain = await _e2ee!.decrypt(encryptedBase64: msg.content, chatId: msg.chatId);
+              decrypted.add(plain != null ? msg.copyWith(content: plain, contentType: 'text') : msg);
+            } else {
+              decrypted.add(msg);
+            }
+          }
           _messages[chatId] = [
             ...? _messages[chatId],
-            ...paginated.messages,
+            ...decrypted,
           ];
           _nextCursors[chatId] = paginated.nextCursor;
           _hasMore[chatId] = paginated.hasMore;
@@ -99,6 +112,15 @@ class ChatProvider extends ChangeNotifier {
     String? mediaUrl,
     String? disappearAfter,
   }) async {
+    String finalContent = content;
+    String finalContentType = contentType;
+    if (_e2ee != null && _e2ee!.enabled && _e2ee!.hasSessionKey(chatId)) {
+      final encrypted = await _e2ee!.encrypt(plaintext: content, chatId: chatId);
+      if (encrypted != null) {
+        finalContent = encrypted;
+        finalContentType = 'e2ee';
+      }
+    }
     try {
       final client = http.Client();
       try {
@@ -107,8 +129,8 @@ class ChatProvider extends ChangeNotifier {
           headers: ApiConfig.headers,
           body: jsonEncode({
             'chat_id': chatId,
-            'content': content,
-            'content_type': contentType,
+            'content': finalContent,
+            'content_type': finalContentType,
             if (replyToId != null) 'reply_to_id': replyToId,
             if (mediaId != null) 'media_id': mediaId,
             if (mediaUrl != null) 'media_url': mediaUrl,
@@ -287,9 +309,9 @@ class ChatProvider extends ChangeNotifier {
     _isConnected = true;
 
     _wsSubscription = _channel!.stream.listen(
-      (data) {
+      (data) async {
         final json = jsonDecode(data as String) as Map<String, dynamic>;
-        _handleWsEvent(json, chatId);
+        await _handleWsEvent(json, chatId);
       },
       onDone: () {
         _isConnected = false;
@@ -303,13 +325,19 @@ class ChatProvider extends ChangeNotifier {
     );
   }
 
-  void _handleWsEvent(Map<String, dynamic> event, String chatId) {
+  Future<void> _handleWsEvent(Map<String, dynamic> event, String chatId) async {
     final type = event['type'] as String?;
     final payload = event['payload'] as Map<String, dynamic>?;
     if (payload == null) return;
 
     if (type == 'message.new') {
-      final msg = Message.fromJson(payload);
+      var msg = Message.fromJson(payload);
+      if (_e2ee != null && _e2ee!.enabled && msg.contentType == 'e2ee') {
+        final decrypted = await _e2ee!.decrypt(encryptedBase64: msg.content, chatId: msg.chatId);
+        if (decrypted != null) {
+          msg = msg.copyWith(content: decrypted, contentType: 'text');
+        }
+      }
       final msgChatId = msg.chatId;
       _messages[msgChatId] = [msg, ...(_messages[msgChatId] ?? [])];
 
