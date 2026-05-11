@@ -4,7 +4,7 @@ import '../../models/group.dart';
 import '../../services/group_service.dart';
 import 'add_members_screen.dart';
 
-class GroupInfoScreen extends StatelessWidget {
+class GroupInfoScreen extends StatefulWidget {
   final Group group;
   final GroupService groupService;
 
@@ -13,6 +13,85 @@ class GroupInfoScreen extends StatelessWidget {
     required this.group,
     required this.groupService,
   });
+
+  @override
+  State<GroupInfoScreen> createState() => _GroupInfoScreenState();
+}
+
+class _GroupInfoScreenState extends State<GroupInfoScreen> {
+  late bool _isMuted;
+  bool _isWorking = false;
+
+  Group get group => widget.group;
+  GroupService get groupService => widget.groupService;
+
+  @override
+  void initState() {
+    super.initState();
+    _isMuted = group.isMuted;
+  }
+
+  Future<void> _toggleMute() async {
+    if (_isWorking) return;
+    setState(() => _isWorking = true);
+    try {
+      if (_isMuted) {
+        await groupService.unmuteGroup(group.id);
+      } else {
+        await groupService.muteGroup(group.id);
+      }
+      if (!mounted) return;
+      setState(() => _isMuted = !_isMuted);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_isMuted ? 'Group muted' : 'Group unmuted')),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isWorking = false);
+    }
+  }
+
+  Future<void> _blockGroup() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Block group?'),
+        content: const Text(
+          'This removes the group from your list and hides it from discovery.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Block', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    setState(() => _isWorking = true);
+    try {
+      await groupService.blockGroup(group.id);
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isWorking = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -52,7 +131,7 @@ class GroupInfoScreen extends StatelessWidget {
                   context,
                   MaterialPageRoute(
                     builder: (_) => AddMembersScreen(
-                      groupService: groupService,
+                            groupService: groupService,
                       groupId: group.id,
                     ),
                   ),
@@ -90,6 +169,20 @@ class GroupInfoScreen extends StatelessWidget {
                 ),
               );
             },
+          ),
+          ListTile(
+            enabled: !_isWorking,
+            leading: Icon(
+              _isMuted ? Icons.notifications_active : Icons.notifications_off,
+            ),
+            title: Text(_isMuted ? 'Unmute group' : 'Mute group'),
+            onTap: _toggleMute,
+          ),
+          ListTile(
+            enabled: !_isWorking,
+            leading: const Icon(Icons.block, color: Colors.red),
+            title: const Text('Block group'),
+            onTap: _blockGroup,
           ),
           if (isAdmin) ...[
             ListTile(

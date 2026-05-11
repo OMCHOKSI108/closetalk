@@ -168,6 +168,51 @@ class GroupService {
     }
   }
 
+  Future<void> muteGroup(String groupId) async {
+    final client = HttpClient();
+    try {
+      final req =
+          await client.postUrl(Uri.parse('$baseUrl/groups/$groupId/mute'));
+      _headers.forEach((k, v) => req.headers.set(k, v));
+      final resp = await req.close();
+      if (resp.statusCode != 200) {
+        throw HttpException('Failed to mute group: ${resp.statusCode}');
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> unmuteGroup(String groupId) async {
+    final client = HttpClient();
+    try {
+      final req =
+          await client.postUrl(Uri.parse('$baseUrl/groups/$groupId/unmute'));
+      _headers.forEach((k, v) => req.headers.set(k, v));
+      final resp = await req.close();
+      if (resp.statusCode != 200) {
+        throw HttpException('Failed to unmute group: ${resp.statusCode}');
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> blockGroup(String groupId) async {
+    final client = HttpClient();
+    try {
+      final req =
+          await client.postUrl(Uri.parse('$baseUrl/groups/$groupId/block'));
+      _headers.forEach((k, v) => req.headers.set(k, v));
+      final resp = await req.close();
+      if (resp.statusCode != 200) {
+        throw HttpException('Failed to block group: ${resp.statusCode}');
+      }
+    } finally {
+      client.close();
+    }
+  }
+
   Future<void> updateSettings(
       String groupId, UpdateGroupSettingsRequest request) async {
     final client = HttpClient();

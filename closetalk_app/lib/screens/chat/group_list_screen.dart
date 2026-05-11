@@ -62,7 +62,15 @@ class _GroupListScreenState extends State<GroupListScreen> {
                     ),
                     title: Text(g.name),
                     subtitle: Text('${g.memberCount} members'),
-                    trailing: Chip(label: Text(g.role)),
+                    trailing: Wrap(
+                      spacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        if (g.isMuted)
+                          const Icon(Icons.notifications_off, size: 18),
+                        Chip(label: Text(g.role)),
+                      ],
+                    ),
                     onTap: () {
                       Navigator.push(
                         context,
@@ -76,6 +84,7 @@ class _GroupListScreenState extends State<GroupListScreen> {
                               isPublic: g.isPublic,
                               memberLimit: g.memberLimit,
                               memberCount: g.memberCount,
+                              isMuted: g.isMuted,
                               role: g.role,
                               createdAt: g.createdAt,
                               updatedAt: g.updatedAt,
@@ -83,7 +92,7 @@ class _GroupListScreenState extends State<GroupListScreen> {
                             groupService: groupService,
                           ),
                         ),
-                      );
+                      ).then((_) => _refresh());
                     },
                   ),
                 );

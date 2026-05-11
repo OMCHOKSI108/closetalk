@@ -32,6 +32,12 @@ type GroupMember struct {
 	MutedUntil *time.Time `json:"muted_until,omitempty"`
 }
 
+type GroupBlock struct {
+	GroupID   uuid.UUID `json:"group_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	BlockedAt time.Time `json:"blocked_at"`
+}
+
 type GroupInvite struct {
 	ID        uuid.UUID `json:"id"`
 	GroupID   uuid.UUID `json:"group_id"`
@@ -105,6 +111,8 @@ type GroupResponse struct {
 	DisappearingMsg  string                  `json:"disappearing_msg"`
 	InviteCode       *string                 `json:"invite_code,omitempty"`
 	MemberCount      int                     `json:"member_count"`
+	IsMuted          bool                    `json:"is_muted"`
+	MutedUntil       *time.Time              `json:"muted_until,omitempty"`
 	Members          []GroupMemberResponse   `json:"members,omitempty"`
 	PinnedMessages   []PinnedMessageResponse `json:"pinned_messages,omitempty"`
 	CreatedAt        time.Time               `json:"created_at"`

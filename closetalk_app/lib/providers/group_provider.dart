@@ -205,6 +205,66 @@ class GroupProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
+  Future<JoinResult> muteGroup(String groupId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.authBaseUrl}/groups/$groupId/mute'),
+        headers: ApiConfig.headers,
+      );
+      if (response.statusCode == 200) {
+        await fetchGroups();
+        return const JoinResult(success: true);
+      }
+      return JoinResult(
+        success: false,
+        error: _parseError(response.body) ??
+            'Could not mute group (HTTP ${response.statusCode})',
+      );
+    } catch (e) {
+      return JoinResult(success: false, error: 'Network error: $e');
+    }
+  }
+
+  Future<JoinResult> unmuteGroup(String groupId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.authBaseUrl}/groups/$groupId/unmute'),
+        headers: ApiConfig.headers,
+      );
+      if (response.statusCode == 200) {
+        await fetchGroups();
+        return const JoinResult(success: true);
+      }
+      return JoinResult(
+        success: false,
+        error: _parseError(response.body) ??
+            'Could not unmute group (HTTP ${response.statusCode})',
+      );
+    } catch (e) {
+      return JoinResult(success: false, error: 'Network error: $e');
+    }
+  }
+
+  Future<JoinResult> blockGroup(String groupId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.authBaseUrl}/groups/$groupId/block'),
+        headers: ApiConfig.headers,
+      );
+      if (response.statusCode == 200) {
+        await fetchGroups();
+        return const JoinResult(success: true);
+      }
+      return JoinResult(
+        success: false,
+        error: _parseError(response.body) ??
+            'Could not block group (HTTP ${response.statusCode})',
+      );
+    } catch (e) {
+      return JoinResult(success: false, error: 'Network error: $e');
+    }
+  }
+
   Future<void> updateSettings(
       String groupId, UpdateGroupSettingsRequest request) async {
     try {
@@ -238,6 +298,19 @@ class GroupProvider extends ChangeNotifier {
   void clearError() {
     _error = null;
     notifyListeners();
+  }
+
+  String? _parseError(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map && decoded['message'] != null) {
+        return decoded['message'].toString();
+      }
+      if (decoded is Map && decoded['error'] != null) {
+        return decoded['error'].toString();
+      }
+    } catch (_) {}
+    return null;
   }
 }
 

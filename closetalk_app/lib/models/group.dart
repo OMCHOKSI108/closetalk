@@ -10,6 +10,8 @@ class Group {
   final String messageRetention;
   final String disappearingMsg;
   final String? inviteCode;
+  final bool isMuted;
+  final DateTime? mutedUntil;
   final String role;
   final List<GroupMember> members;
   final List<PinnedMessage> pinnedMessages;
@@ -28,6 +30,8 @@ class Group {
     this.messageRetention = 'off',
     this.disappearingMsg = 'off',
     this.inviteCode,
+    this.isMuted = false,
+    this.mutedUntil,
     this.role = 'member',
     this.members = const [],
     this.pinnedMessages = const [],
@@ -48,6 +52,8 @@ class Group {
       messageRetention: json['message_retention'] as String? ?? 'off',
       disappearingMsg: json['disappearing_msg'] as String? ?? 'off',
       inviteCode: json['invite_code'] as String?,
+      isMuted: json['is_muted'] as bool? ?? false,
+      mutedUntil: DateTime.tryParse(json['muted_until'] as String? ?? ''),
       role: json['role'] as String? ?? 'member',
       members: (json['members'] as List<dynamic>?)
               ?.map((m) => GroupMember.fromJson(m as Map<String, dynamic>))
@@ -74,6 +80,8 @@ class Group {
         'message_retention': messageRetention,
         'disappearing_msg': disappearingMsg,
         'invite_code': inviteCode,
+        'is_muted': isMuted,
+        'muted_until': mutedUntil?.toIso8601String(),
         'role': role,
         'members': members.map((m) => m.toJson()).toList(),
         'pinned_messages': pinnedMessages.map((p) => p.toJson()).toList(),
@@ -151,6 +159,7 @@ class GroupListItem {
   final int memberLimit;
   final int memberCount;
   final String role;
+  final bool isMuted;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -163,6 +172,7 @@ class GroupListItem {
     this.memberLimit = 1000,
     this.memberCount = 0,
     this.role = 'member',
+    this.isMuted = false,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -177,6 +187,7 @@ class GroupListItem {
       memberLimit: json['member_limit'] as int? ?? 1000,
       memberCount: json['member_count'] as int? ?? 0,
       role: json['role'] as String? ?? 'member',
+      isMuted: json['is_muted'] as bool? ?? false,
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
     );

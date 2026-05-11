@@ -179,18 +179,21 @@ func handleGetGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var g model.Group
+	var mutedUntil *time.Time
 	err = database.Pool.QueryRow(ctx,
 		`SELECT g.id, g.conversation_id, g.name, COALESCE(g.description, ''), COALESCE(g.avatar_url, ''),
 		        g.created_by, g.is_public, g.member_limit, g.created_at, g.updated_at,
 		        COALESCE(g.invite_code, ''), COALESCE(gs.message_retention, 'off'), COALESCE(gs.disappearing_msg, 'off'),
-		        (SELECT COUNT(*) FROM group_members WHERE group_id = g.id)
+		        (SELECT COUNT(*) FROM group_members WHERE group_id = g.id AND left_at IS NULL),
+		        gm.muted_until
 		 FROM groups g
+		 JOIN group_members gm ON gm.group_id = g.id AND gm.user_id = $2 AND gm.left_at IS NULL
 		 LEFT JOIN group_settings gs ON gs.group_id = g.id
 		 WHERE g.id = $1`,
-		groupID,
+		groupID, parsedUserID,
 	).Scan(&g.ID, &g.ConversationID, &g.Name, &g.Description, &g.AvatarURL,
 		&g.CreatedBy, &g.IsPublic, &g.MemberLimit, &g.CreatedAt, &g.UpdatedAt,
-		&g.InviteCode, &g.MessageRetention, &g.DisappearingMsg, &g.MemberCount)
+		&g.InviteCode, &g.MessageRetention, &g.DisappearingMsg, &g.MemberCount, &mutedUntil)
 	if err != nil {
 		writeError(w, http.StatusNotFound, &model.AppError{Code: "GROUP_NOT_FOUND", Message: "group not found"})
 		return
@@ -247,6 +250,8 @@ func handleGetGroup(w http.ResponseWriter, r *http.Request) {
 			DisappearingMsg:  g.DisappearingMsg,
 			InviteCode:       g.InviteCode,
 			MemberCount:      g.MemberCount,
+			IsMuted:          mutedUntil != nil && mutedUntil.After(time.Now()),
+			MutedUntil:       mutedUntil,
 			CreatedAt:        g.CreatedAt,
 			UpdatedAt:        g.UpdatedAt,
 			Members:          members,
@@ -267,6 +272,8 @@ func handleGetGroup(w http.ResponseWriter, r *http.Request) {
 		DisappearingMsg:  g.DisappearingMsg,
 		InviteCode:       g.InviteCode,
 		MemberCount:      g.MemberCount,
+		IsMuted:          mutedUntil != nil && mutedUntil.After(time.Now()),
+		MutedUntil:       mutedUntil,
 		CreatedAt:        g.CreatedAt,
 		UpdatedAt:        g.UpdatedAt,
 		Members:          members,
@@ -286,11 +293,13 @@ func handleListGroups(w http.ResponseWriter, r *http.Request) {
 	rows, err := database.Pool.Query(ctx,
 		`SELECT g.id, g.name, g.description, g.avatar_url, g.is_public, g.member_limit,
 		        g.created_at, g.updated_at,
-		        (SELECT COUNT(*) FROM group_members WHERE group_id = g.id),
-		        gm.role
+		        (SELECT COUNT(*) FROM group_members WHERE group_id = g.id AND left_at IS NULL),
+		        gm.role,
+		        gm.muted_until IS NOT NULL AND gm.muted_until > now()
 		 FROM groups g
 		 JOIN group_members gm ON gm.group_id = g.id
 		 WHERE gm.user_id = $1 AND gm.left_at IS NULL
+		   AND NOT EXISTS (SELECT 1 FROM group_blocks gb WHERE gb.group_id = g.id AND gb.user_id = $1)
 		 ORDER BY g.updated_at DESC`,
 		parsedUserID,
 	)
@@ -309,6 +318,7 @@ func handleListGroups(w http.ResponseWriter, r *http.Request) {
 		MemberLimit int       `json:"member_limit"`
 		MemberCount int       `json:"member_count"`
 		Role        string    `json:"role"`
+		IsMuted     bool      `json:"is_muted"`
 		CreatedAt   time.Time `json:"created_at"`
 		UpdatedAt   time.Time `json:"updated_at"`
 	}
@@ -317,7 +327,7 @@ func handleListGroups(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var g groupListItem
 		rows.Scan(&g.ID, &g.Name, &g.Description, &g.AvatarURL, &g.IsPublic, &g.MemberLimit,
-			&g.CreatedAt, &g.UpdatedAt, &g.MemberCount, &g.Role)
+			&g.CreatedAt, &g.UpdatedAt, &g.MemberCount, &g.Role, &g.IsMuted)
 		groups = append(groups, g)
 	}
 
@@ -437,6 +447,16 @@ func handleJoinGroup(w http.ResponseWriter, r *http.Request) {
 
 	if memberCount >= memberLimit {
 		writeError(w, http.StatusConflict, &model.AppError{Code: "GROUP_FULL", Message: "group has reached member limit"})
+		return
+	}
+
+	var blocked bool
+	database.Pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM group_blocks WHERE group_id = $1 AND user_id = $2)`,
+		groupID, parsedUserID,
+	).Scan(&blocked)
+	if blocked {
+		writeError(w, http.StatusForbidden, &model.AppError{Code: "GROUP_BLOCKED", Message: "you have blocked this group"})
 		return
 	}
 
@@ -923,6 +943,174 @@ func handleUpdateGroupSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
+func parseGroupAndUser(r *http.Request) (uuid.UUID, uuid.UUID, *model.AppError) {
+	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
+	groupIDStr := chi.URLParam(r, "id")
+	groupID, err := model.ParseUUID(groupIDStr)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, &model.AppError{Code: "VALIDATION", Message: "invalid group_id"}
+	}
+	parsedUserID, err := model.ParseUUID(userID)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, &model.AppError{Code: "INTERNAL", Message: "invalid user identity"}
+	}
+	return groupID, parsedUserID, nil
+}
+
+func handleMuteGroup(w http.ResponseWriter, r *http.Request) {
+	groupID, parsedUserID, appErr := parseGroupAndUser(r)
+	if appErr != nil {
+		status := http.StatusBadRequest
+		if appErr.Code == "INTERNAL" {
+			status = http.StatusInternalServerError
+		}
+		writeError(w, status, appErr)
+		return
+	}
+
+	ctx := context.Background()
+	mutedUntil := time.Now().UTC().AddDate(100, 0, 0)
+	tag, err := database.Pool.Exec(ctx,
+		`UPDATE group_members SET muted_until = $3
+		 WHERE group_id = $1 AND user_id = $2 AND left_at IS NULL`,
+		groupID, parsedUserID, mutedUntil,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "failed to mute group"})
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusForbidden, &model.AppError{Code: "NOT_MEMBER", Message: "you are not a member of this group"})
+		return
+	}
+
+	_, _ = database.Pool.Exec(ctx,
+		`UPDATE conversation_participants cp SET is_muted = true
+		 FROM groups g
+		 WHERE g.conversation_id = cp.conversation_id
+		   AND g.id = $1 AND cp.user_id = $2`,
+		groupID, parsedUserID,
+	)
+
+	writeJSON(w, http.StatusOK, map[string]any{"status": "muted", "muted_until": mutedUntil})
+}
+
+func handleUnmuteGroup(w http.ResponseWriter, r *http.Request) {
+	groupID, parsedUserID, appErr := parseGroupAndUser(r)
+	if appErr != nil {
+		status := http.StatusBadRequest
+		if appErr.Code == "INTERNAL" {
+			status = http.StatusInternalServerError
+		}
+		writeError(w, status, appErr)
+		return
+	}
+
+	ctx := context.Background()
+	tag, err := database.Pool.Exec(ctx,
+		`UPDATE group_members SET muted_until = NULL
+		 WHERE group_id = $1 AND user_id = $2 AND left_at IS NULL`,
+		groupID, parsedUserID,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "failed to unmute group"})
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusForbidden, &model.AppError{Code: "NOT_MEMBER", Message: "you are not a member of this group"})
+		return
+	}
+
+	_, _ = database.Pool.Exec(ctx,
+		`UPDATE conversation_participants cp SET is_muted = false
+		 FROM groups g
+		 WHERE g.conversation_id = cp.conversation_id
+		   AND g.id = $1 AND cp.user_id = $2`,
+		groupID, parsedUserID,
+	)
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "unmuted"})
+}
+
+func handleBlockGroup(w http.ResponseWriter, r *http.Request) {
+	groupID, parsedUserID, appErr := parseGroupAndUser(r)
+	if appErr != nil {
+		status := http.StatusBadRequest
+		if appErr.Code == "INTERNAL" {
+			status = http.StatusInternalServerError
+		}
+		writeError(w, status, appErr)
+		return
+	}
+
+	ctx := context.Background()
+	tx, err := database.Pool.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "failed to block group"})
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	var convID uuid.UUID
+	var role string
+	err = tx.QueryRow(ctx,
+		`SELECT g.conversation_id, COALESCE(gm.role, '')
+		 FROM groups g
+		 LEFT JOIN group_members gm ON gm.group_id = g.id AND gm.user_id = $2 AND gm.left_at IS NULL
+		 WHERE g.id = $1`,
+		groupID, parsedUserID,
+	).Scan(&convID, &role)
+	if err != nil {
+		writeError(w, http.StatusNotFound, &model.AppError{Code: "GROUP_NOT_FOUND", Message: "group not found"})
+		return
+	}
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO group_blocks (group_id, user_id) VALUES ($1, $2)
+		 ON CONFLICT (group_id, user_id) DO UPDATE SET blocked_at = now()`,
+		groupID, parsedUserID,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "failed to block group"})
+		return
+	}
+
+	if role != "" {
+		if _, err = tx.Exec(ctx,
+			`DELETE FROM group_members WHERE group_id = $1 AND user_id = $2`,
+			groupID, parsedUserID,
+		); err != nil {
+			writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "failed to leave group"})
+			return
+		}
+		_, _ = tx.Exec(ctx,
+			`DELETE FROM conversation_participants WHERE conversation_id = $1 AND user_id = $2`,
+			convID, parsedUserID,
+		)
+
+		if role == "admin" {
+			var newAdminID uuid.UUID
+			err := tx.QueryRow(ctx,
+				`SELECT user_id FROM group_members WHERE group_id = $1 AND left_at IS NULL ORDER BY joined_at ASC LIMIT 1`,
+				groupID,
+			).Scan(&newAdminID)
+			if err == nil {
+				_, _ = tx.Exec(ctx,
+					`UPDATE group_members SET role = 'admin' WHERE group_id = $1 AND user_id = $2`,
+					groupID, newAdminID,
+				)
+			}
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "INTERNAL", Message: "failed to block group"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "blocked"})
+}
+
 func handlePinMessage(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
 	groupIDStr := chi.URLParam(r, "id")
@@ -1035,6 +1223,7 @@ func handleDiscoverGroups(w http.ResponseWriter, r *http.Request) {
 			        EXISTS(SELECT 1 FROM group_members WHERE group_id = g.id AND user_id = $1 AND left_at IS NULL) AS is_member
 			 FROM groups g
 			 WHERE g.is_public = true
+			   AND NOT EXISTS (SELECT 1 FROM group_blocks gb WHERE gb.group_id = g.id AND gb.user_id = $1)
 			   AND (g.name ILIKE $2 OR g.description ILIKE $2)
 			 ORDER BY member_count DESC, g.created_at DESC
 			 LIMIT $3`,
@@ -1047,6 +1236,7 @@ func handleDiscoverGroups(w http.ResponseWriter, r *http.Request) {
 			        EXISTS(SELECT 1 FROM group_members WHERE group_id = g.id AND user_id = $1 AND left_at IS NULL) AS is_member
 			 FROM groups g
 			 WHERE g.is_public = true
+			   AND NOT EXISTS (SELECT 1 FROM group_blocks gb WHERE gb.group_id = g.id AND gb.user_id = $1)
 			 ORDER BY member_count DESC, g.created_at DESC
 			 LIMIT $2`,
 			parsedUserID, limit,
