@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,11 +13,11 @@ import (
 )
 
 type MemStore struct {
-	mu         sync.RWMutex
-	messages   map[uuid.UUID]*model.Message
-	reactions  map[uuid.UUID][]model.Reaction // messageID -> reactions
-	reads      map[uuid.UUID]map[string]time.Time // messageID -> userID -> read_at
-	bookmarks  map[string]map[uuid.UUID]*BookmarkEntry // userID -> messageID -> entry
+	mu        sync.RWMutex
+	messages  map[uuid.UUID]*model.Message
+	reactions map[uuid.UUID][]model.Reaction          // messageID -> reactions
+	reads     map[uuid.UUID]map[string]time.Time      // messageID -> userID -> read_at
+	bookmarks map[string]map[uuid.UUID]*BookmarkEntry // userID -> messageID -> entry
 }
 
 type BookmarkEntry struct {
@@ -180,6 +181,33 @@ func (s *MemStore) ListBookmarks(ctx context.Context, userID string, cursor time
 				Preview:   entry.Preview,
 				CreatedAt: entry.CreatedAt,
 			})
+		}
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].CreatedAt.After(result[j].CreatedAt)
+	})
+
+	hasMore := len(result) > limit
+	if len(result) > limit {
+		result = result[:limit]
+	}
+
+	return result, hasMore, nil
+}
+
+func (s *MemStore) SearchMessages(ctx context.Context, chatID string, query string, cursor time.Time, limit int) ([]*model.Message, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	queryLower := strings.ToLower(query)
+
+	var result []*model.Message
+	for _, msg := range s.messages {
+		if msg.ChatID == chatID && msg.CreatedAt.Before(cursor) && !msg.IsDeleted {
+			if strings.Contains(strings.ToLower(msg.Content), queryLower) {
+				result = append(result, msg)
+			}
 		}
 	}
 

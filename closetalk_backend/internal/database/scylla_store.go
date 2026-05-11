@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/OMCHOKSI108/closetalk/internal/model"
@@ -184,6 +185,46 @@ func (s *ScyllaMessageStore) ListBookmarks(ctx context.Context, userID string, c
 
 	hasMore := len(result) == limit
 	return result, hasMore, nil
+}
+
+func (s *ScyllaMessageStore) SearchMessages(ctx context.Context, chatID string, query string, cursor time.Time, limit int) ([]*model.Message, bool, error) {
+	queryLower := strings.ToLower(query)
+
+	iter := Scylla.Query(
+		`SELECT chat_id, created_at, message_id, sender_id, content, content_type,
+		 media_url, media_id, reply_to_id, status, moderation_status, is_deleted
+		 FROM closetalk.messages
+		 WHERE chat_id = ? AND created_at < ?
+		 ORDER BY created_at DESC
+		 LIMIT ?`,
+		chatID, cursor, limit*3,
+	).WithContext(ctx).Iter()
+
+	var matched []*model.Message
+	var msg model.Message
+	for iter.Scan(
+		&msg.ChatID, &msg.CreatedAt, &msg.ID, &msg.SenderID,
+		&msg.Content, &msg.ContentType, &msg.MediaURL, &msg.MediaID,
+		&msg.ReplyToID, &msg.Status, &msg.ModerationStatus, &msg.IsDeleted,
+	) {
+		if msg.IsDeleted {
+			continue
+		}
+		if strings.Contains(strings.ToLower(msg.Content), queryLower) {
+			m := msg
+			matched = append(matched, &m)
+			if len(matched) >= limit {
+				break
+			}
+		}
+	}
+
+	if err := iter.Close(); err != nil {
+		return nil, false, fmt.Errorf("search messages: %w", err)
+	}
+
+	hasMore := len(matched) == limit
+	return matched, hasMore, nil
 }
 
 // Ensure compile-time interface compliance

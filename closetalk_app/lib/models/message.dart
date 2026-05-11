@@ -139,6 +139,64 @@ class Reaction {
       };
 }
 
+class SearchResult {
+  final String messageId;
+  final String chatId;
+  final String senderId;
+  final String senderName;
+  final String content;
+  final String contentType;
+  final String snippet;
+  final DateTime createdAt;
+
+  SearchResult({
+    required this.messageId,
+    required this.chatId,
+    required this.senderId,
+    required this.senderName,
+    required this.content,
+    required this.contentType,
+    required this.snippet,
+    required this.createdAt,
+  });
+
+  factory SearchResult.fromJson(Map<String, dynamic> json) {
+    return SearchResult(
+      messageId: json['message_id'] as String,
+      chatId: json['chat_id'] as String,
+      senderId: json['sender_id'] as String,
+      senderName: json['sender_name'] as String? ?? '',
+      content: json['content'] as String,
+      contentType: json['content_type'] as String? ?? 'text',
+      snippet: json['snippet'] as String? ?? '',
+      createdAt: DateTime.parse(json['created_at'] as String),
+    );
+  }
+}
+
+class SearchMessagesResponse {
+  final List<SearchResult> results;
+  final String? nextCursor;
+  final bool hasMore;
+
+  SearchMessagesResponse({
+    required this.results,
+    this.nextCursor,
+    this.hasMore = false,
+  });
+
+  factory SearchMessagesResponse.fromJson(Map<String, dynamic> json) {
+    return SearchMessagesResponse(
+      results: (json['results'] as List<dynamic>?)
+              ?.map((e) => SearchResult.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          [],
+      nextCursor: json['next_cursor'] as String?,
+      hasMore: json['has_more'] as bool? ?? false,
+    );
+  }
+}
+
 class PaginatedMessages {
   final List<Message> messages;
   final String? nextCursor;

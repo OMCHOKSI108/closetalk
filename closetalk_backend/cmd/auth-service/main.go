@@ -286,7 +286,7 @@ func main() {
 	srv.Shutdown(ctx)
 }
 
-// â”€â”€â”€ Handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Handlers ----------------------------------------------------------------
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -964,7 +964,7 @@ func handleGitHubOAuth(w http.ResponseWriter, r *http.Request, code string) {
 		return
 	}
 
-	// GitHub doesn't always return email in /user â€” fetch emails if needed
+	// GitHub doesn't always return email in /user -- fetch emails if needed
 	email := ghUser.Email
 	if email == "" {
 		emailReq, _ := http.NewRequest("GET", "https://api.github.com/user/emails", nil)
@@ -2012,7 +2012,7 @@ func handleRevokeDevice(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "device revoked"})
 }
 
-// â”€â”€â”€ Contact Handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Contact Handlers --------------------------------------------------------
 
 func handleSendContactRequest(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
@@ -2307,7 +2307,7 @@ func handleCreateDirectConversation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, model.DirectConversationResponse{ChatID: chatID})
 }
 
-// â”€â”€â”€ User Profile â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- User Profile ------------------------------------------------------------
 
 func handleUserProfile(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
@@ -2355,7 +2355,7 @@ func handleUserProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, profile)
 }
 
-// â”€â”€â”€ Avatar Upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Avatar Upload -----------------------------------------------------------
 
 func handleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)

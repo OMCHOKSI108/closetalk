@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -93,6 +94,7 @@ func main() {
 
 		r.Post("/messages", handleSendMessage)
 		r.Get("/messages/{chatId}", handleGetMessages)
+		r.Get("/messages/{chatId}/search", handleSearchMessages)
 		r.Put("/messages/{messageId}", handleEditMessage)
 		r.Delete("/messages/{messageId}", handleDeleteMessage)
 		r.Post("/messages/{messageId}/react", handleReactToMessage)
@@ -662,6 +664,76 @@ func handleMarkRead(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "read"})
+}
+
+func handleSearchMessages(w http.ResponseWriter, r *http.Request) {
+	chatID := chi.URLParam(r, "chatId")
+	if chatID == "" {
+		writeError(w, http.StatusBadRequest, "VALIDATION", "chat_id is required")
+		return
+	}
+
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		writeJSON(w, http.StatusOK, model.SearchMessagesResponse{Results: []model.SearchResult{}, HasMore: false})
+		return
+	}
+
+	cursor := time.Now()
+	if c := r.URL.Query().Get("cursor"); c != "" {
+		if t, err := time.Parse(time.RFC3339, c); err == nil {
+			cursor = t
+		}
+	}
+
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 50 {
+			limit = parsed
+		}
+	}
+
+	ctx := context.Background()
+	messages, hasMore, err := database.GlobalStore.SearchMessages(ctx, chatID, query, cursor, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to search messages")
+		return
+	}
+
+	senderIDs := make([]string, 0, len(messages))
+	for _, msg := range messages {
+		senderIDs = append(senderIDs, msg.SenderID)
+	}
+	usernames := getUsernames(ctx, senderIDs)
+
+	results := make([]model.SearchResult, 0, len(messages))
+	for _, msg := range messages {
+		snippet := msg.Content
+		if len(snippet) > 150 {
+			snippet = snippet[:150] + "..."
+		}
+		results = append(results, model.SearchResult{
+			MessageID:   msg.ID.String(),
+			ChatID:      msg.ChatID,
+			SenderID:    msg.SenderID,
+			SenderName:  usernames[msg.SenderID],
+			Content:     msg.Content,
+			ContentType: msg.ContentType,
+			Snippet:     snippet,
+			CreatedAt:   msg.CreatedAt,
+		})
+	}
+
+	var nextCursor string
+	if len(messages) > 0 {
+		nextCursor = messages[len(messages)-1].CreatedAt.Format(time.RFC3339)
+	}
+
+	writeJSON(w, http.StatusOK, model.SearchMessagesResponse{
+		Results:    results,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	})
 }
 
 func handleAddBookmark(w http.ResponseWriter, r *http.Request) {

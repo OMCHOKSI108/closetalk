@@ -710,7 +710,7 @@ resource "aws_lb_listener_rule" "auth_service" {
 
   condition {
     path_pattern {
-      values = ["/", "/auth/*", "/devices/*", "/groups/*", "/health"]
+      values = ["/", "/auth/*", "/devices", "/devices/*", "/groups/*", "/users/*", "/health"]
     }
   }
 }

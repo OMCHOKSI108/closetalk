@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/OMCHOKSI108/closetalk/internal/model"
@@ -64,10 +65,10 @@ func InitDynamoDBSchema() error {
 	ctx := context.Background()
 
 	tables := []struct {
-		Name   string
-		PK     string
-		SK     string
-		GSIs   []types.GlobalSecondaryIndex
+		Name    string
+		PK      string
+		SK      string
+		GSIs    []types.GlobalSecondaryIndex
 		AttrDef []types.AttributeDefinition
 	}{
 		{
@@ -642,6 +643,45 @@ func unmarshalMessage(item map[string]types.AttributeValue) (*model.Message, err
 		CreatedAt:        createdAt,
 		EditedAt:         editedAt,
 	}, nil
+}
+
+func (s *DynamoDBStore) SearchMessages(ctx context.Context, chatID string, query string, cursor time.Time, limit int) ([]*model.Message, bool, error) {
+	queryLower := strings.ToLower(query)
+
+	cursorKey := sortKeyFromTime(cursor, uuid.Nil)
+
+	result, err := Dynamo.Query(ctx, &dynamodb.QueryInput{
+		TableName:              aws.String("closetalk-messages"),
+		KeyConditionExpression: aws.String("chat_id = :cid AND sort_key < :cursor"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":cid":    &types.AttributeValueMemberS{Value: chatID},
+			":cursor": &types.AttributeValueMemberS{Value: cursorKey},
+		},
+		ScanIndexForward: aws.Bool(false),
+		Limit:            aws.Int32(100),
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("search messages: %w", err)
+	}
+
+	var matched []*model.Message
+	for _, item := range result.Items {
+		msg, err := unmarshalMessage(item)
+		if err != nil || msg.IsDeleted {
+			continue
+		}
+		if strings.Contains(strings.ToLower(msg.Content), queryLower) {
+			matched = append(matched, msg)
+		}
+	}
+
+	hasMore := result.LastEvaluatedKey != nil
+
+	if len(matched) > limit {
+		matched = matched[:limit]
+	}
+
+	return matched, hasMore, nil
 }
 
 var _ MessageStore = (*DynamoDBStore)(nil)

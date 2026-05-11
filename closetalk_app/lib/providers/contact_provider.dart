@@ -136,28 +136,50 @@ class ContactProvider extends ChangeNotifier {
   }
 
   Future<List<Map<String, dynamic>>> searchUsers(String query) async {
-    if (query.isEmpty) return [];
+    final result = await searchUsersDetailed(query);
+    return result.users;
+  }
+
+  Future<UserSearchResult> searchUsersDetailed(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return const UserSearchResult(users: []);
     try {
       final client = HttpClient();
       try {
-        final req = await client.getUrl(
-          Uri.parse('${ApiConfig.authBaseUrl}/users/search?q=$query'),
-        );
+        final uri = Uri.parse('${ApiConfig.authBaseUrl}/users/search')
+            .replace(queryParameters: {'q': trimmed});
+        final req = await client.getUrl(uri);
         req.headers.set('Authorization', 'Bearer ${ApiConfig.token}');
         final resp = await req.close();
         final body = await resp.transform(utf8.decoder).join();
         if (resp.statusCode == 200) {
           final data = jsonDecode(body) as Map<String, dynamic>;
-          final users = (data['users'] as List<dynamic>)
-              .cast<Map<String, dynamic>>();
-          _addToSearchHistory(query);
-          return users;
+          final users = (data['users'] as List<dynamic>?)
+                  ?.cast<Map<String, dynamic>>() ??
+              const [];
+          if (users.isNotEmpty) _addToSearchHistory(trimmed);
+          return UserSearchResult(users: users);
         }
+        return UserSearchResult(
+          users: const [],
+          statusCode: resp.statusCode,
+          error: _errorFromBody(body, resp.statusCode),
+        );
       } finally {
         client.close();
       }
+    } catch (e) {
+      return UserSearchResult(users: const [], error: 'Network error: $e');
+    }
+  }
+
+  String _errorFromBody(String body, int code) {
+    try {
+      final j = jsonDecode(body);
+      if (j is Map && j['error'] != null) return j['error'].toString();
+      if (j is Map && j['message'] != null) return j['message'].toString();
     } catch (_) {}
-    return [];
+    return 'Search failed (HTTP $code)';
   }
 
   Future<UserPublicProfile?> getUserProfile(String userId) async {
@@ -286,4 +308,14 @@ class ContactProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
   }
+}
+
+class UserSearchResult {
+  final List<Map<String, dynamic>> users;
+  final String? error;
+  final int? statusCode;
+
+  const UserSearchResult({required this.users, this.error, this.statusCode});
+
+  bool get hasError => error != null;
 }

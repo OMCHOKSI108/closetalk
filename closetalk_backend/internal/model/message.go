@@ -133,3 +133,33 @@ type StatusEntry struct {
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at"`
 }
+
+type SearchMessagesRequest struct {
+	ChatID string `json:"chat_id"`
+	Query  string `json:"query"`
+	Cursor string `json:"cursor,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+type SearchResult struct {
+	MessageID   string    `json:"message_id"`
+	ChatID      string    `json:"chat_id"`
+	SenderID    string    `json:"sender_id"`
+	SenderName  string    `json:"sender_name,omitempty"`
+	Content     string    `json:"content"`
+	ContentType string    `json:"content_type"`
+	Snippet     string    `json:"snippet"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type SearchMessagesResponse struct {
+	Results    []SearchResult `json:"results"`
+	NextCursor string         `json:"next_cursor,omitempty"`
+	HasMore    bool           `json:"has_more"`
+}
+
+type SearchMessagesRequestParams struct {
+	Query  string `json:"q"`
+	Cursor string `json:"cursor"`
+	Limit  int    `json:"limit"`
+}

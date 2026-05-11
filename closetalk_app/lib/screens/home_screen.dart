@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import '../services/auth_service.dart';
 import '../widgets/user_avatar.dart';
 import 'auth/login_screen.dart';
 import 'chat/chat_list_screen.dart';
 import 'chat/group_list_screen.dart';
+import 'chat/join_group_screen.dart';
 import 'chat/user_profile_screen.dart';
+import 'photos/photos_screen.dart';
+import 'settings/bookmark_list_screen.dart';
+import 'settings/device_management_screen.dart';
 import 'settings/edit_profile_screen.dart';
-import 'settings/settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,20 +23,23 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
 
-  final _screens = const [
+  static const List<Widget> _screens = [
     ChatListScreen(),
     GroupListScreen(),
-    SettingsScreen(),
+    PhotosScreen(),
   ];
+
+  static const List<String> _titles = ['CloseTalk', 'Groups', 'Photos'];
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+    final authService = context.read<AuthService>();
     final user = auth.user;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('CloseTalk'),
+        title: Text(_titles[_currentIndex]),
       ),
       drawer: Drawer(
         child: ListView(
@@ -44,19 +51,19 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               currentAccountPicture: GestureDetector(
                 onTap: () {
-                  if (user != null) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => UserProfileScreen(
-                          userId: user.id,
-                          username: user.username,
-                          displayName: user.displayName,
-                          avatarUrl: user.avatarUrl,
-                        ),
+                  if (user == null) return;
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => UserProfileScreen(
+                        userId: user.id,
+                        username: user.username,
+                        displayName: user.displayName,
+                        avatarUrl: user.avatarUrl,
                       ),
-                    );
-                  }
+                    ),
+                  );
                 },
                 child: UserAvatar(
                   imageUrl: user?.avatarUrl,
@@ -71,28 +78,29 @@ class _HomeScreenState extends State<HomeScreen> {
               accountEmail: Text('@${user?.username ?? ''}'),
             ),
             ListTile(
-              leading: const Icon(Icons.person),
+              leading: const Icon(Icons.person_outline),
               title: const Text('My Profile'),
               onTap: () {
-                if (user != null) {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => UserProfileScreen(
-                        userId: user.id,
-                        username: user.username,
-                        displayName: user.displayName,
-                        avatarUrl: user.avatarUrl,
-                      ),
+                if (user == null) return;
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => UserProfileScreen(
+                      userId: user.id,
+                      username: user.username,
+                      displayName: user.displayName,
+                      avatarUrl: user.avatarUrl,
                     ),
-                  );
-                }
+                  ),
+                );
               },
             ),
             ListTile(
-              leading: const Icon(Icons.edit),
+              leading: const Icon(Icons.edit_outlined),
               title: const Text('Edit Profile'),
               onTap: () {
+                Navigator.pop(context);
                 Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -101,26 +109,63 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
               },
             ),
+            const Divider(),
             ListTile(
-              leading: const Icon(Icons.settings),
-              title: const Text('Settings'),
+              leading: const Icon(Icons.bookmark_outline),
+              title: const Text('Bookmarks'),
               onTap: () {
                 Navigator.pop(context);
-                setState(() => _currentIndex = 2);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const BookmarkListScreen(),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.devices_outlined),
+              title: const Text('Linked Devices'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => DeviceManagementScreen(
+                      authService: authService,
+                    ),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.group_add_outlined),
+              title: const Text('Join Group'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const JoinGroupScreen(),
+                  ),
+                );
               },
             ),
             const Divider(),
             ListTile(
               leading: const Icon(Icons.logout, color: Colors.red),
-              title: const Text('Logout',
-                  style: TextStyle(color: Colors.red)),
+              title: const Text(
+                'Logout',
+                style: TextStyle(color: Colors.red),
+              ),
               onTap: () async {
                 await auth.logout();
                 if (context.mounted) {
                   Navigator.pushAndRemoveUntil(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => const LoginScreen()),
+                      builder: (_) => const LoginScreen(),
+                    ),
                     (_) => false,
                   );
                 }
@@ -136,7 +181,7 @@ class _HomeScreenState extends State<HomeScreen> {
         destinations: const [
           NavigationDestination(icon: Icon(Icons.chat), label: 'Chats'),
           NavigationDestination(icon: Icon(Icons.group), label: 'Groups'),
-          NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
+          NavigationDestination(icon: Icon(Icons.photo_library), label: 'Photos'),
         ],
       ),
     );
