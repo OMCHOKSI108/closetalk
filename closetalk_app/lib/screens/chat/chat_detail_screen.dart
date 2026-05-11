@@ -23,6 +23,7 @@ import '../../widgets/user_avatar.dart';
 import '../../widgets/voice_recorder_sheet.dart';
 import '../../widgets/sticker_picker_sheet.dart';
 import '../../widgets/location_picker.dart';
+import 'user_profile_screen.dart';
 import '../../widgets/poll_creator_sheet.dart';
 import '../../providers/poll_provider.dart';
 import 'forward_to_screen.dart';
@@ -499,6 +500,23 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     }
   }
 
+  void _openPeerProfile() {
+    final contact = _peerContact();
+    final peerId = widget.peerUserId ?? contact?.contactId;
+    if (peerId == null || peerId.isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => UserProfileScreen(
+          userId: peerId,
+          username: contact?.username ?? '',
+          displayName: contact?.displayName ?? widget.chatTitle,
+          avatarUrl: contact?.avatarUrl ?? '',
+        ),
+      ),
+    );
+  }
+
   void _openGroupInfo() {
     if (widget.groupId == null) return;
     final groupService = GroupService(
@@ -571,7 +589,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       ),
       title: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: widget.groupId != null ? _openGroupInfo : null,
+        onTap: widget.groupId != null ? _openGroupInfo : _openPeerProfile,
         child: Row(
           children: [
             UserAvatar(

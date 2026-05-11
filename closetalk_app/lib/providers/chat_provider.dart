@@ -302,18 +302,81 @@ class ChatProvider extends ChangeNotifier {
   }
 
   Future<void> reactToMessage(String messageId, String emoji) async {
+    // Optimistic toggle so the UI reacts instantly. The server is authoritative,
+    // so we reconcile with the response (and any websocket broadcast).
+    final myId = currentUserId;
+    if (myId != null) {
+      _toggleReactionLocally(messageId: messageId, userId: myId, emoji: emoji);
+      notifyListeners();
+    }
+
     try {
       final client = http.Client();
       try {
-        await client.post(
+        final response = await client.post(
           Uri.parse('${ApiConfig.baseUrl}/messages/$messageId/react'),
           headers: ApiConfig.headers,
           body: jsonEncode({'emoji': emoji}),
         );
+        if (response.statusCode == 200) {
+          final body = jsonDecode(response.body) as Map<String, dynamic>;
+          final list = (body['reactions'] as List<dynamic>?) ?? const [];
+          final reactions = list
+              .map((e) => Reaction.fromJson(e as Map<String, dynamic>))
+              .toList();
+          _applyReactions(messageId: messageId, reactions: reactions);
+          notifyListeners();
+        }
       } finally {
         client.close();
       }
-    } catch (_) {}
+    } catch (_) {
+      // Network error — server didn't see the toggle. Revert.
+      if (myId != null) {
+        _toggleReactionLocally(messageId: messageId, userId: myId, emoji: emoji);
+        notifyListeners();
+      }
+    }
+  }
+
+  void _toggleReactionLocally({
+    required String messageId,
+    required String userId,
+    required String emoji,
+  }) {
+    for (final entry in _messages.entries) {
+      final list = entry.value;
+      final index = list.indexWhere((m) => m.id == messageId);
+      if (index < 0) continue;
+      final msg = list[index];
+      final has = msg.reactions
+          .any((r) => r.userId == userId && r.emoji == emoji);
+      final next = List<Reaction>.from(msg.reactions);
+      if (has) {
+        next.removeWhere((r) => r.userId == userId && r.emoji == emoji);
+      } else {
+        next.add(Reaction(
+          userId: userId,
+          emoji: emoji,
+          createdAt: DateTime.now(),
+        ));
+      }
+      list[index] = msg.copyWith(reactions: next);
+      return;
+    }
+  }
+
+  void _applyReactions({
+    required String messageId,
+    required List<Reaction> reactions,
+  }) {
+    for (final entry in _messages.entries) {
+      final list = entry.value;
+      final index = list.indexWhere((m) => m.id == messageId);
+      if (index < 0) continue;
+      list[index] = list[index].copyWith(reactions: reactions);
+      return;
+    }
   }
 
   Future<SearchMessagesResponse> searchMessages(
@@ -468,6 +531,15 @@ class ChatProvider extends ChangeNotifier {
           return;
         }
       }
+    } else if (type == 'message.reaction') {
+      final messageId = payload['message_id'] as String?;
+      final raw = payload['reactions'] as List<dynamic>?;
+      if (messageId == null) return;
+      final reactions = (raw ?? const [])
+          .map((e) => Reaction.fromJson(e as Map<String, dynamic>))
+          .toList();
+      _applyReactions(messageId: messageId, reactions: reactions);
+      notifyListeners();
     } else if (type == 'typing.start' || type == 'typing.stop') {
       final senderId = payload['sender_id'] as String?;
       final eventChatId = payload['chat_id'] as String? ?? chatId;

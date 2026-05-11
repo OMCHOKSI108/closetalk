@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../models/message.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/contact_provider.dart';
 import '../../services/sync_service.dart';
@@ -125,7 +126,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final chatProvider = context.read<ChatProvider>();
     final pinnedIds = chatProvider.pinnedChatIds;
 
-    var result = _conversationsWithAcceptedContacts();
+    var result = _withProviderLatest(_conversationsWithAcceptedContacts());
 
     switch (_filterIndex) {
       case 1: // Unread
@@ -159,13 +160,57 @@ class _ChatListScreenState extends State<ChatListScreen> {
       }
       byId[chatId] = _Conversation(
         chatId: chatId,
-        lastMessage: 'Say hello',
+        lastMessage: 'No messages yet',
         lastTime: contact.createdAt,
         senderId: contact.contactId,
         senderName: contact.displayName,
+        isPlaceholder: true,
       );
     }
     return byId.values.toList();
+  }
+
+  /// For each conversation, prefer the most recent message from ChatProvider
+  /// (which is kept up-to-date by the websocket). Falls back to the synced
+  /// snapshot if the provider has no cached messages for that chat yet.
+  List<_Conversation> _withProviderLatest(List<_Conversation> conversations) {
+    final chatProvider = context.read<ChatProvider>();
+    return conversations.map((conv) {
+      final messages = chatProvider.getMessages(conv.chatId);
+      if (messages.isEmpty) return conv;
+      // getMessages returns newest-first (see ChatProvider._handleWsEvent
+      // and fetchMessages, both of which prepend).
+      final latest = messages.first;
+      if (!conv.isPlaceholder && !latest.createdAt.isAfter(conv.lastTime)) {
+        return conv;
+      }
+      return conv.copyWith(
+        lastMessage: _previewFor(latest),
+        lastTime: latest.createdAt,
+        senderId: latest.senderId,
+        isPlaceholder: false,
+      );
+    }).toList();
+  }
+
+  String _previewFor(Message m) {
+    if (m.isDeleted) return 'Message deleted';
+    switch (m.contentType) {
+      case 'image':
+        return '📷 Photo';
+      case 'video':
+        return '🎬 Video';
+      case 'audio':
+      case 'voice':
+        return '🎙 Voice message';
+      case 'file':
+        return '📎 File';
+      case 'location':
+        return '📍 Location';
+      default:
+        final t = m.content.trim();
+        return t.isEmpty ? 'No messages yet' : t;
+    }
   }
 
   @override
@@ -256,9 +301,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                 ),
                               ],
                             ),
-                            subtitle: Text(conv.lastMessage,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis),
+                            subtitle: Text(
+                              conv.lastMessage,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: conv.isPlaceholder
+                                  ? TextStyle(
+                                      color: Colors.grey[500],
+                                      fontStyle: FontStyle.italic,
+                                    )
+                                  : null,
+                            ),
                             trailing: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -358,6 +411,7 @@ class _Conversation {
   final DateTime lastTime;
   final String senderId;
   final String senderName;
+  final bool isPlaceholder;
 
   _Conversation({
     required this.chatId,
@@ -365,5 +419,23 @@ class _Conversation {
     required this.lastTime,
     required this.senderId,
     required this.senderName,
+    this.isPlaceholder = false,
   });
+
+  _Conversation copyWith({
+    String? lastMessage,
+    DateTime? lastTime,
+    String? senderId,
+    String? senderName,
+    bool? isPlaceholder,
+  }) {
+    return _Conversation(
+      chatId: chatId,
+      lastMessage: lastMessage ?? this.lastMessage,
+      lastTime: lastTime ?? this.lastTime,
+      senderId: senderId ?? this.senderId,
+      senderName: senderName ?? this.senderName,
+      isPlaceholder: isPlaceholder ?? this.isPlaceholder,
+    );
+  }
 }
