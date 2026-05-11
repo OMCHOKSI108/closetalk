@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'dart:ui';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -29,8 +33,48 @@ import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await NotificationService().initialize();
-  runApp(const CloseTalkApp());
+
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    _reportFlutterError(details);
+  };
+
+  PlatformDispatcher.instance.onError = (error, stack) {
+    _reportError(error, stack, source: 'platform');
+    return true;
+  };
+
+  runZonedGuarded(
+    () async {
+      try {
+        await NotificationService().initialize();
+      } catch (error, stack) {
+        _reportError(error, stack, source: 'notification_init');
+      }
+      runApp(const CloseTalkApp());
+    },
+    (error, stack) => _reportError(error, stack, source: 'zone'),
+  );
+}
+
+void _reportFlutterError(FlutterErrorDetails details) {
+  _reportError(
+    details.exception,
+    details.stack ?? StackTrace.current,
+    source: details.context?.toDescription() ?? 'flutter',
+  );
+}
+
+void _reportError(
+  Object error,
+  StackTrace stack, {
+  required String source,
+}) {
+  if (!kReleaseMode) {
+    debugPrint('[app_error][$source] $error');
+    debugPrintStack(stackTrace: stack);
+  }
+  // Production hook: send this to Crashlytics or Sentry before Play Store launch.
 }
 
 class CloseTalkApp extends StatelessWidget {
@@ -79,6 +123,7 @@ class CloseTalkApp extends StatelessWidget {
         builder: (context, auth, theme, _) {
           return MaterialApp(
             title: 'CloseTalk',
+            debugShowCheckedModeBanner: false,
             theme: AppTheme.light,
             darkTheme: AppTheme.dark,
             themeMode: theme.mode,

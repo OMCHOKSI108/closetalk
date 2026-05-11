@@ -17,6 +17,7 @@ class ChatProvider extends ChangeNotifier {
   WebSocketChannel? _channel;
   StreamSubscription? _wsSubscription;
   bool _isConnected = false;
+  bool _readNotifyQueued = false;
   String? currentUserId;
 
   List<Message> getMessages(String chatId) => _messages[chatId] ?? [];
@@ -35,8 +36,18 @@ class ChatProvider extends ChangeNotifier {
   bool hasUnread(String chatId) => unreadCount(chatId) > 0;
 
   void markChatRead(String chatId) {
+    if ((_unreadCounts[chatId] ?? 0) == 0) return;
     _unreadCounts[chatId] = 0;
-    notifyListeners();
+    _notifyReadStateSoon();
+  }
+
+  void _notifyReadStateSoon() {
+    if (_readNotifyQueued) return;
+    _readNotifyQueued = true;
+    Future.microtask(() {
+      _readNotifyQueued = false;
+      notifyListeners();
+    });
   }
 
   Set<String> typingUsers(String chatId) => _typingUsers[chatId] ?? {};
@@ -103,7 +114,7 @@ class ChatProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Future<void> sendMessage({
+  Future<bool> sendMessage({
     required String chatId,
     required String content,
     String contentType = 'text',
@@ -112,6 +123,7 @@ class ChatProvider extends ChangeNotifier {
     String? mediaUrl,
     String? disappearAfter,
   }) async {
+    final tempId = 'local_${DateTime.now().microsecondsSinceEpoch}';
     String finalContent = content;
     String finalContentType = contentType;
     if (_e2ee != null && _e2ee!.enabled && _e2ee!.hasSessionKey(chatId)) {
@@ -121,10 +133,26 @@ class ChatProvider extends ChangeNotifier {
         finalContentType = 'e2ee';
       }
     }
+
+    final optimistic = Message(
+      id: tempId,
+      chatId: chatId,
+      senderId: currentUserId ?? '',
+      content: finalContent,
+      contentType: finalContentType,
+      mediaId: mediaId,
+      mediaUrl: mediaUrl,
+      replyToId: replyToId,
+      status: 'sending',
+      createdAt: DateTime.now(),
+    );
+    _messages[chatId] = [optimistic, ...(_messages[chatId] ?? [])];
+    notifyListeners();
+
     try {
       final client = http.Client();
       try {
-        await client.post(
+        final response = await client.post(
           Uri.parse('${ApiConfig.baseUrl}/messages'),
           headers: ApiConfig.headers,
           body: jsonEncode({
@@ -138,10 +166,56 @@ class ChatProvider extends ChangeNotifier {
                 disappearAfter!,
           }),
         );
+
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          Message sent = optimistic.copyWith(status: 'sent');
+          try {
+            final body = jsonDecode(response.body);
+            if (body is Map<String, dynamic> && body['id'] != null) {
+              sent = Message.fromJson(body);
+            } else if (body is Map<String, dynamic> &&
+                body['message'] is Map<String, dynamic>) {
+              sent = Message.fromJson(body['message'] as Map<String, dynamic>);
+            }
+          } catch (_) {}
+          _replaceLocalMessage(chatId, tempId, sent);
+          return true;
+        }
+
+        _replaceLocalMessage(
+          chatId,
+          tempId,
+          optimistic.copyWith(status: 'failed'),
+        );
+        return false;
       } finally {
         client.close();
       }
-    } catch (_) {}
+    } catch (_) {
+      _replaceLocalMessage(
+        chatId,
+        tempId,
+        optimistic.copyWith(status: 'failed'),
+      );
+      return false;
+    }
+  }
+
+  void _replaceLocalMessage(String chatId, String tempId, Message replacement) {
+    final list = _messages[chatId];
+    if (list == null) return;
+    final existingServerIndex =
+        list.indexWhere((m) => m.id == replacement.id && m.id != tempId);
+    if (existingServerIndex >= 0) {
+      list.removeWhere((m) => m.id == tempId);
+      notifyListeners();
+      return;
+    }
+    final index = list.indexWhere((m) => m.id == tempId);
+    if (index >= 0) {
+      list[index] = replacement;
+      notifyListeners();
+    }
   }
 
   Future<Map<String, String>?> uploadVoice(
@@ -370,6 +444,8 @@ class ChatProvider extends ChangeNotifier {
         }
       }
       final msgChatId = msg.chatId;
+      final list = _messages[msgChatId] ?? [];
+      if (list.any((m) => m.id == msg.id)) return;
       _messages[msgChatId] = [msg, ...(_messages[msgChatId] ?? [])];
 
       if (currentUserId != null && msg.senderId != currentUserId) {

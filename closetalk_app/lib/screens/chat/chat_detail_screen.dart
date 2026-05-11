@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/message.dart';
 import '../../models/group.dart';
+import '../../models/contact.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/call_provider.dart';
@@ -18,6 +19,7 @@ import '../../services/api_config.dart';
 import '../../services/media_service.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/chat_input_bar.dart';
+import '../../widgets/user_avatar.dart';
 import '../../widgets/voice_recorder_sheet.dart';
 import '../../widgets/sticker_picker_sheet.dart';
 import '../../widgets/location_picker.dart';
@@ -529,12 +531,165 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
+  Contact? _peerContact() {
+    final contacts = context.read<ContactProvider>().contacts;
+    for (final contact in contacts) {
+      if (contact.conversationId == widget.chatId ||
+          contact.contactId == widget.peerUserId) {
+        return contact;
+      }
+    }
+    return null;
+  }
+
+  PreferredSizeWidget _buildChatAppBar() {
+    final scheme = Theme.of(context).colorScheme;
+    final contact = _peerContact();
+    final title = widget.chatTitle.isNotEmpty
+        ? widget.chatTitle
+        : contact?.displayName ?? 'Chat';
+    final isTyping = context
+        .watch<ChatProvider>()
+        .typingUsers(widget.chatId)
+        .where((uid) => uid != context.read<AuthProvider>().user?.id)
+        .isNotEmpty;
+    final status = isTyping
+        ? 'typing...'
+        : contact?.isOnline == true
+            ? 'online'
+            : widget.groupId != null
+                ? 'group chat'
+                : 'tap for profile';
+
+    return AppBar(
+      automaticallyImplyLeading: false,
+      titleSpacing: 0,
+      leadingWidth: 42,
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back),
+        onPressed: () => Navigator.maybePop(context),
+      ),
+      title: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: widget.groupId != null ? _openGroupInfo : null,
+        child: Row(
+          children: [
+            UserAvatar(
+              imageUrl: contact?.avatarUrl,
+              name: title,
+              radius: 18,
+              isOnline: contact?.isOnline == true,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    status,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: isTyping ? scheme.primary : scheme.outline,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.call_outlined),
+          tooltip: 'Voice call',
+          onPressed: _startVoiceCall,
+        ),
+        IconButton(
+          icon: const Icon(Icons.videocam_outlined),
+          tooltip: 'Video call',
+          onPressed: _startVideoCall,
+        ),
+        IconButton(
+          icon: const Icon(Icons.search),
+          onPressed: _toggleSearch,
+          tooltip: 'Search',
+        ),
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert),
+          onSelected: (value) {
+            if (value == 'mute') _toggleMute();
+            if (value == 'e2ee') _enableE2EE();
+            if (value == 'refresh') {
+              context
+                  .read<ChatProvider>()
+                  .fetchMessages(widget.chatId, refresh: true);
+            }
+            if (value == 'info') _openGroupInfo();
+          },
+          itemBuilder: (_) => [
+            if (widget.groupId != null)
+              const PopupMenuItem(value: 'info', child: Text('Group info')),
+            PopupMenuItem(
+              value: 'mute',
+              child: Text(_isMuted ? 'Unmute chat' : 'Mute chat'),
+            ),
+            if (widget.groupId == null)
+              PopupMenuItem(
+                value: 'e2ee',
+                child: Text(_e2eeEnabled ? 'E2EE enabled' : 'Enable E2EE'),
+              ),
+            const PopupMenuItem(value: 'refresh', child: Text('Refresh')),
+          ],
+        ),
+      ],
+    );
+  }
+
+  void _startVoiceCall() {
+    final call = context.read<CallProvider>();
+    call.startCall(widget.chatId, widget.chatId, false);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CallScreen(
+          remoteUserId: widget.chatId,
+          remoteDisplayName: widget.chatTitle,
+          isVideo: false,
+        ),
+      ),
+    );
+  }
+
+  void _startVideoCall() {
+    final call = context.read<CallProvider>();
+    call.startCall(widget.chatId, widget.chatId, true);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CallScreen(
+          remoteUserId: widget.chatId,
+          remoteDisplayName: widget.chatTitle,
+          isVideo: true,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final userId = context.watch<AuthProvider>().user?.id ?? '';
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: _isSearching ? AppBar(
         title: _isSearching
             ? TextField(
                 controller: _searchCtl,
@@ -634,7 +789,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             ),
           ],
         ],
-      ),
+      ) : _buildChatAppBar(),
       body: _isSearching ? _buildSearchResults() : _buildChat(userId),
     );
   }
@@ -806,8 +961,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             onSticker: _showStickerPicker,
             onLocation: _shareLocation,
             onPoll: _createPoll,
-            onSend: (text) {
-              context.read<ChatProvider>().sendMessage(
+            onSend: (text) async {
+              final ok = await context.read<ChatProvider>().sendMessage(
                     chatId: widget.chatId,
                     content: text,
                     replyToId: _replyToMessageId,
@@ -815,9 +970,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               _cancelReply();
               _typingDebounce?.cancel();
               context.read<ChatProvider>().sendTyping(widget.chatId, false);
+              _scrollToLatest();
+              if (!ok && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Message failed to send')),
+                );
+              }
             },
-            onSendFormatted: (text) {
-              context.read<ChatProvider>().sendMessage(
+            onSendFormatted: (text) async {
+              final ok = await context.read<ChatProvider>().sendMessage(
                     chatId: widget.chatId,
                     content: text,
                     contentType: 'formatted',
@@ -826,6 +987,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               _cancelReply();
               _typingDebounce?.cancel();
               context.read<ChatProvider>().sendTyping(widget.chatId, false);
+              _scrollToLatest();
+              if (!ok && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Message failed to send')),
+                );
+              }
             },
             onAttach: _pickAndSendImage,
             onRecord: _showVoiceRecorder,
@@ -836,6 +1003,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         ],
       ),
     );
+  }
+
+  void _scrollToLatest() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   void _voteInPoll(Message msg, int optionIndex) {
