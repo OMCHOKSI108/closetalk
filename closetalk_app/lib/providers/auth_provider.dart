@@ -433,32 +433,45 @@ class AuthProvider extends ChangeNotifier {
     if (bio != null) body['bio'] = bio;
     if (avatarUrl != null) body['avatar_url'] = avatarUrl;
 
-    try {
+    Future<HttpClientResponse> doRequest() async {
       final client = HttpClient();
-      try {
-        final req = await client.putUrl(
-            Uri.parse('${ApiConfig.authBaseUrl}/auth/profile'));
-        req.headers.set('Content-Type', 'application/json');
-        req.headers.set('Authorization', 'Bearer $_token');
-        req.write(jsonEncode(body));
-        final resp = await req.close();
-        final responseBody = await resp.transform(utf8.decoder).join();
+      final req = await client.putUrl(
+          Uri.parse('${ApiConfig.authBaseUrl}/auth/profile'));
+      req.headers.set('Content-Type', 'application/json');
+      req.headers.set('Authorization', 'Bearer $_token');
+      req.write(jsonEncode(body));
+      return req.close();
+    }
 
-        if (resp.statusCode == 200) {
-          final data = jsonDecode(responseBody) as Map<String, dynamic>;
-          _user = User.fromJson(data['user'] as Map<String, dynamic>);
-          await _saveSession();
-          notifyListeners();
-          return data;
+    try {
+      var resp = await doRequest();
+      var responseBody = await resp.transform(utf8.decoder).join();
+
+      if (resp.statusCode == 401) {
+        // Access token expired — try refresh, then retry once.
+        final refreshed = await refreshToken();
+        if (refreshed) {
+          resp = await doRequest();
+          responseBody = await resp.transform(utf8.decoder).join();
         } else {
-          final err = jsonDecode(responseBody) as Map<String, dynamic>;
-          _error = err['error'] as String? ?? 'Failed to update profile';
+          _status = AuthStatus.unauthenticated;
+          _error = 'Session expired, please sign in again';
           notifyListeners();
-          return err;
+          return {'error': _error};
         }
-      } finally {
-        client.close();
       }
+
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(responseBody) as Map<String, dynamic>;
+        _user = User.fromJson(data['user'] as Map<String, dynamic>);
+        await _saveSession();
+        notifyListeners();
+        return data;
+      }
+      final err = jsonDecode(responseBody) as Map<String, dynamic>;
+      _error = err['error'] as String? ?? 'Failed to update profile';
+      notifyListeners();
+      return err;
     } catch (e) {
       _error = 'Network error: $e';
       notifyListeners();

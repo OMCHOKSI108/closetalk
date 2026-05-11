@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"log"
 	"math/big"
@@ -179,6 +180,7 @@ func main() {
 		r.Post("/oauth", handleOAuth)
 		r.Post("/refresh", handleRefresh)
 		r.Post("/recover", handleRecover)
+		r.Get("/recover", handleRecoverPage)
 		r.Post("/recover/email", handleRecoverEmail)
 		r.Post("/recover/email/complete", handleRecoverEmailComplete)
 	})
@@ -284,7 +286,7 @@ func main() {
 	srv.Shutdown(ctx)
 }
 
-// ─── Handlers ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -497,7 +499,7 @@ func handleRegisterVerify(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, model.AuthResponse{
 		AccessToken:   accessToken,
 		RefreshToken:  refreshToken,
-		ExpiresIn:     900,
+		ExpiresIn:     3600,
 		User:          model.UserResponse{ID: parsedID, Email: &pending.Email, Username: pending.Username, DisplayName: pending.DisplayName},
 		RecoveryCodes: codes,
 	})
@@ -607,7 +609,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, model.AuthResponse{
 		AccessToken:   accessToken,
 		RefreshToken:  refreshToken,
-		ExpiresIn:     900,
+		ExpiresIn:     3600,
 		User:          model.UserResponse{ID: parsedID, Email: &req.Email, Username: req.Username, DisplayName: req.DisplayName},
 		RecoveryCodes: codes,
 	})
@@ -657,7 +659,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, model.AuthResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    900,
+		ExpiresIn:    3600,
 		User: model.UserResponse{
 			ID:          user.ID,
 			Email:       user.Email,
@@ -777,7 +779,7 @@ func handleGoogleOAuth(w http.ResponseWriter, r *http.Request, idToken string) {
 	writeJSON(w, http.StatusOK, model.AuthResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    900,
+		ExpiresIn:    3600,
 		User: model.UserResponse{
 			ID:          user.ID,
 			Email:       ptr(email),
@@ -962,7 +964,7 @@ func handleGitHubOAuth(w http.ResponseWriter, r *http.Request, code string) {
 		return
 	}
 
-	// GitHub doesn't always return email in /user — fetch emails if needed
+	// GitHub doesn't always return email in /user â€” fetch emails if needed
 	email := ghUser.Email
 	if email == "" {
 		emailReq, _ := http.NewRequest("GET", "https://api.github.com/user/emails", nil)
@@ -1043,7 +1045,7 @@ func handleGitHubOAuth(w http.ResponseWriter, r *http.Request, code string) {
 	writeJSON(w, http.StatusOK, model.AuthResponse{
 		AccessToken:  accessTokenJWT,
 		RefreshToken: refreshToken,
-		ExpiresIn:    900,
+		ExpiresIn:    3600,
 		User: model.UserResponse{
 			ID:          user.ID,
 			Email:       ptr(email),
@@ -1128,7 +1130,7 @@ func handleAppleOAuth(w http.ResponseWriter, r *http.Request, idToken string) {
 	writeJSON(w, http.StatusOK, model.AuthResponse{
 		AccessToken:  accessTokenJWT,
 		RefreshToken: refreshToken,
-		ExpiresIn:    900,
+		ExpiresIn:    3600,
 		User: model.UserResponse{
 			ID:          user.ID,
 			Email:       ptr(email),
@@ -1307,7 +1309,7 @@ func handleRefresh(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, model.RefreshResponse{
 		AccessToken:  accessToken,
 		RefreshToken: newRefreshToken,
-		ExpiresIn:    900,
+		ExpiresIn:    3600,
 	})
 }
 
@@ -1375,7 +1377,7 @@ func handleRecover(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, model.AuthResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    900,
+		ExpiresIn:    3600,
 		User:         model.UserResponse{ID: parsedID},
 	})
 }
@@ -1479,6 +1481,84 @@ func handleRecoverEmailComplete(w http.ResponseWriter, r *http.Request) {
 	database.DeleteSession(ctx, "recover:"+req.Token)
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "password updated successfully"})
+}
+
+var recoverPageTpl = template.Must(template.New("recover").Parse(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reset your CloseTalk password</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0;padding:24px;background:#f5f3ef;color:#2a1d12;display:flex;min-height:100vh;align-items:center;justify-content:center}
+  .card{background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.08);padding:32px;width:100%;max-width:420px}
+  h1{margin:0 0 8px;font-size:22px}
+  p{margin:0 0 20px;color:#6b5a48;font-size:14px}
+  label{display:block;font-size:13px;margin:12px 0 4px;color:#3a2a1c}
+  input{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:15px}
+  button{width:100%;margin-top:20px;padding:12px;border:0;border-radius:8px;background:#5a3a24;color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+  button:disabled{opacity:.6;cursor:not-allowed}
+  .msg{margin-top:16px;font-size:14px;padding:10px 12px;border-radius:8px;display:none}
+  .msg.error{display:block;background:#fde8e8;color:#9b1c1c}
+  .msg.ok{display:block;background:#e6f4ea;color:#1e6b3a}
+</style>
+</head>
+<body>
+  <form class="card" id="f">
+    <h1>Reset your password</h1>
+    <p>Choose a new password for your CloseTalk account.</p>
+    <label for="p1">New password</label>
+    <input id="p1" type="password" minlength="8" required autocomplete="new-password">
+    <label for="p2">Confirm password</label>
+    <input id="p2" type="password" minlength="8" required autocomplete="new-password">
+    <button id="b" type="submit">Update password</button>
+    <div id="m" class="msg"></div>
+  </form>
+<script>
+(function(){
+  var token = {{.Token}};
+  var f = document.getElementById('f');
+  var b = document.getElementById('b');
+  var m = document.getElementById('m');
+  function show(cls, text){ m.className = 'msg ' + cls; m.textContent = text; }
+  if(!token){ show('error', 'Missing or invalid recovery link.'); b.disabled = true; return; }
+  f.addEventListener('submit', function(e){
+    e.preventDefault();
+    var p1 = document.getElementById('p1').value;
+    var p2 = document.getElementById('p2').value;
+    if(p1 !== p2){ show('error', 'Passwords do not match.'); return; }
+    if(p1.length < 8){ show('error', 'Password must be at least 8 characters.'); return; }
+    b.disabled = true; show('', 'Updating...');
+    fetch('/auth/recover/email/complete', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token: token, new_password: p1})
+    }).then(function(r){ return r.json().then(function(j){ return {ok: r.ok, j: j}; }); })
+      .then(function(res){
+        if(res.ok){
+          show('ok', 'Password updated. You can close this page and sign in.');
+          b.style.display = 'none';
+        } else {
+          var err = (res.j && (res.j.error || (res.j.message))) || 'Could not reset password.';
+          show('error', err);
+          b.disabled = false;
+        }
+      })
+      .catch(function(){ show('error', 'Network error. Please try again.'); b.disabled = false; });
+  });
+})();
+</script>
+</body>
+</html>`))
+
+func handleRecoverPage(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := recoverPageTpl.Execute(w, map[string]string{"Token": token}); err != nil {
+		log.Printf("[recover] template error: %v", err)
+	}
 }
 
 var sesClient *sesv2.Client
@@ -1932,7 +2012,7 @@ func handleRevokeDevice(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "device revoked"})
 }
 
-// ─── Contact Handlers ────────────────────────────────────────────────────────
+// â”€â”€â”€ Contact Handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 func handleSendContactRequest(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
@@ -2227,7 +2307,7 @@ func handleCreateDirectConversation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, model.DirectConversationResponse{ChatID: chatID})
 }
 
-// ─── User Profile ────────────────────────────────────────────────────────────
+// â”€â”€â”€ User Profile â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 func handleUserProfile(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
@@ -2275,7 +2355,7 @@ func handleUserProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, profile)
 }
 
-// ─── Avatar Upload ───────────────────────────────────────────────────────────
+// â”€â”€â”€ Avatar Upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 func handleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.Context().Value(middleware.UserIDKey).(string)
