@@ -45,7 +45,7 @@ class Group {
       name: json['name'] as String,
       description: json['description'] as String? ?? '',
       avatarUrl: json['avatar_url'] as String? ?? '',
-      createdBy: json['created_by'] as String,
+      createdBy: json['created_by'] as String? ?? '',
       isPublic: json['is_public'] as bool? ?? false,
       memberLimit: json['member_limit'] as int? ?? 1000,
       memberCount: json['member_count'] as int? ?? 0,
@@ -63,8 +63,10 @@ class Group {
               ?.map((p) => PinnedMessage.fromJson(p as Map<String, dynamic>))
               .toList() ??
           [],
-      createdAt: DateTime.parse(json['created_at'] as String),
-      updatedAt: DateTime.parse(json['updated_at'] as String),
+      createdAt: DateTime.tryParse(json['created_at'] as String? ?? '') ??
+          DateTime.now(),
+      updatedAt: DateTime.tryParse(json['updated_at'] as String? ?? '') ??
+          DateTime.now(),
     );
   }
 
@@ -108,10 +110,11 @@ class GroupMember {
   factory GroupMember.fromJson(Map<String, dynamic> json) {
     return GroupMember(
       userId: json['user_id'] as String,
-      displayName: json['display_name'] as String,
+      displayName: json['display_name'] as String? ?? 'Member',
       avatarUrl: json['avatar_url'] as String? ?? '',
-      role: json['role'] as String,
-      joinedAt: DateTime.parse(json['joined_at'] as String),
+      role: json['role'] as String? ?? 'member',
+      joinedAt: DateTime.tryParse(json['joined_at'] as String? ?? '') ??
+          DateTime.now(),
     );
   }
 
@@ -188,8 +191,10 @@ class GroupListItem {
       memberCount: json['member_count'] as int? ?? 0,
       role: json['role'] as String? ?? 'member',
       isMuted: json['is_muted'] as bool? ?? false,
-      createdAt: DateTime.parse(json['created_at'] as String),
-      updatedAt: DateTime.parse(json['updated_at'] as String),
+      createdAt: DateTime.tryParse(json['created_at'] as String? ?? '') ??
+          DateTime.now(),
+      updatedAt: DateTime.tryParse(json['updated_at'] as String? ?? '') ??
+          DateTime.now(),
     );
   }
 }

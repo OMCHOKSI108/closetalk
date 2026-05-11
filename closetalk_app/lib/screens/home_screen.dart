@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
@@ -15,6 +17,7 @@ import 'photos/photos_screen.dart';
 import 'settings/bookmark_list_screen.dart';
 import 'settings/device_management_screen.dart';
 import 'settings/edit_profile_screen.dart';
+import '../theme/app_theme.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -26,13 +29,13 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
 
-  static const List<Widget> _screens = [
-    ChatListScreen(),
-    GroupListScreen(),
-    PhotosScreen(),
+  static const List<String> _titles = [
+    'CloseTalk',
+    'Explore',
+    'Groups',
+    'Calls',
+    'Profile',
   ];
-
-  static const List<String> _titles = ['CloseTalk', 'Groups', 'Photos'];
 
   @override
   void initState() {
@@ -138,14 +141,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 trailing: cp.pendingRequests.isEmpty
                     ? null
                     : Badge.count(count: cp.pendingRequests.length),
-                onTap: () {
+                onTap: () async {
+                  final contacts = context.read<ContactProvider>();
                   Navigator.pop(context);
-                  Navigator.push(
+                  await Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (_) => const ContactRequestsScreen(),
                     ),
-                  ).then((_) => context.read<ContactProvider>().loadContacts());
+                  );
+                  if (!mounted) return;
+                  contacts.loadContacts();
                 },
               ),
             ),
@@ -214,15 +220,174 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-      body: _screens[_currentIndex],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (i) => setState(() => _currentIndex = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.chat), label: 'Chats'),
-          NavigationDestination(icon: Icon(Icons.group), label: 'Groups'),
-          NavigationDestination(icon: Icon(Icons.photo_library), label: 'Photos'),
-        ],
+      extendBody: true,
+      body: Padding(
+        padding: const EdgeInsets.only(bottom: 84),
+        child: _buildCurrentScreen(user),
+      ),
+      bottomNavigationBar: _GlassNavBar(
+        currentIndex: _currentIndex,
+        onChanged: (i) => setState(() => _currentIndex = i),
+      ),
+    );
+  }
+
+  Widget _buildCurrentScreen(dynamic user) {
+    switch (_currentIndex) {
+      case 0:
+        return const ChatListScreen();
+      case 1:
+        return const PhotosScreen();
+      case 2:
+        return const GroupListScreen();
+      case 3:
+        return const _CallsPlaceholder();
+      case 4:
+        if (user == null) return const Center(child: Text('Profile unavailable'));
+        return UserProfileScreen(
+          userId: user.id,
+          username: user.username,
+          displayName: user.displayName,
+          avatarUrl: user.avatarUrl,
+        );
+      default:
+        return const ChatListScreen();
+    }
+  }
+}
+
+class _GlassNavBar extends StatelessWidget {
+  final int currentIndex;
+  final ValueChanged<int> onChanged;
+
+  const _GlassNavBar({
+    required this.currentIndex,
+    required this.onChanged,
+  });
+
+  static const _items = [
+    (Icons.chat_bubble_rounded, 'Chats'),
+    (Icons.explore_rounded, 'Explore'),
+    (Icons.groups_rounded, 'Groups'),
+    (Icons.call_rounded, 'Calls'),
+    (Icons.person_rounded, 'Profile'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      minimum: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(28),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Container(
+            height: 68,
+            decoration: BoxDecoration(
+              color: AppColors.glass,
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+              boxShadow: [AppColors.glow(opacity: 0.22)],
+            ),
+            child: Row(
+              children: List.generate(_items.length, (index) {
+                final selected = index == currentIndex;
+                final item = _items[index];
+                return Expanded(
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(24),
+                    onTap: () => onChanged(index),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOut,
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        gradient: selected ? AppColors.primaryGradient : null,
+                        color: selected
+                            ? null
+                            : Colors.white.withValues(alpha: 0.03),
+                        borderRadius: BorderRadius.circular(22),
+                        boxShadow: selected
+                            ? [AppColors.glow(opacity: 0.30)]
+                            : null,
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            item.$1,
+                            size: 21,
+                            color: selected
+                                ? AppColors.textPrimary
+                                : AppColors.textSecondary,
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            item.$2,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(
+                                  color: selected
+                                      ? AppColors.textPrimary
+                                      : AppColors.textMuted,
+                                  fontSize: 10,
+                                  fontWeight: selected
+                                      ? FontWeight.w800
+                                      : FontWeight.w600,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CallsPlaceholder extends StatelessWidget {
+  const _CallsPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          color: AppColors.glass,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+          boxShadow: [AppColors.glow(opacity: 0.16)],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.call_rounded, size: 42, color: AppColors.coral),
+            const SizedBox(height: 12),
+            Text(
+              'Calls',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Voice and video call history will appear here.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
       ),
     );
   }

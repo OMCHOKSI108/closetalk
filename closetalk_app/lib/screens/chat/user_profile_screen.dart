@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/contact_provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../theme/app_theme.dart';
 import '../../widgets/user_avatar.dart';
+import '../settings/edit_profile_screen.dart';
 import 'chat_detail_screen.dart';
 
 class UserProfileScreen extends StatefulWidget {
@@ -228,10 +230,33 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     final isOwnProfile = widget.userId ==
         context.read<AuthProvider>().user?.id;
 
+    final authUser = context.watch<AuthProvider>().user;
+    final displayName = isOwnProfile
+        ? authUser?.displayName ?? widget.displayName
+        : widget.displayName;
+    final username =
+        isOwnProfile ? authUser?.username ?? widget.username : widget.username;
+    final avatarUrl =
+        isOwnProfile ? authUser?.avatarUrl ?? widget.avatarUrl : widget.avatarUrl;
+    final bio = (_bio != null && _bio!.trim().isNotEmpty)
+        ? _bio!.trim()
+        : isOwnProfile && (authUser?.bio.trim().isNotEmpty ?? false)
+            ? authUser!.bio.trim()
+            : '';
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.displayName),
+        title: Text(isOwnProfile ? 'Profile' : displayName),
         actions: [
+          if (isOwnProfile)
+            IconButton(
+              tooltip: 'Edit Profile',
+              icon: const Icon(Icons.edit_rounded),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const EditProfileScreen()),
+              ),
+            ),
           if (!isOwnProfile)
             PopupMenuButton<String>(
               onSelected: (v) {
@@ -271,20 +296,28 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           ? const Center(child: CircularProgressIndicator())
           : LayoutBuilder(
               builder: (context, constraints) => SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 110),
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
-                    minHeight: constraints.maxHeight - 48,
+                    minHeight: constraints.maxHeight - 134,
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      UserAvatar(
-                    imageUrl: widget.avatarUrl,
-                    name: widget.displayName,
-                    radius: 48,
-                    isOnline: _isOnline,
-                  ),
+                      Container(
+                        padding: const EdgeInsets.all(5),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: AppColors.warmGradient,
+                          boxShadow: [AppColors.glow(color: AppColors.orange)],
+                        ),
+                        child: UserAvatar(
+                          imageUrl: avatarUrl,
+                          name: displayName,
+                          radius: 54,
+                          isOnline: _isOnline,
+                        ),
+                      ),
                   const SizedBox(height: 8),
                   if (_isOnline || _lastSeen != null)
                     Text(
@@ -296,23 +329,55 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                     ),
                   const SizedBox(height: 16),
                   Text(
-                    widget.displayName,
+                    displayName,
                     style: Theme.of(context).textTheme.headlineSmall,
+                    textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '@${widget.username}',
-                    style: TextStyle(color: Colors.grey[600]),
+                    '@$username',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
                   ),
-                  if (_bio != null && _bio!.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    Text(
-                      _bio!,
+                  const SizedBox(height: 18),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceHigh.withValues(alpha: 0.72),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
+                    ),
+                    child: Text(
+                      bio.isEmpty ? 'No bio added yet.' : bio,
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey[700]),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: bio.isEmpty
+                                ? AppColors.textMuted
+                                : AppColors.textPrimary,
+                          ),
+                    ),
+                  ),
+                  if (isOwnProfile) ...[
+                    const SizedBox(height: 18),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const EditProfileScreen(),
+                          ),
+                        ),
+                        icon: const Icon(Icons.edit_rounded),
+                        label: const Text('Edit Profile'),
+                      ),
                     ),
                   ],
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 28),
                   if (!isOwnProfile) ...[
                     if (_contactStatus == null)
                       _buildActionButton(

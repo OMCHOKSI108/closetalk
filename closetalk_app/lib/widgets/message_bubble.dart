@@ -1,8 +1,9 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:intl/intl.dart';
 import '../models/message.dart';
+import '../theme/app_theme.dart';
 import 'voice_message_content.dart';
 import 'location_content.dart';
 import 'poll_content.dart';
@@ -43,26 +44,30 @@ class MessageBubble extends StatelessWidget {
           height: 14,
           child: CircularProgressIndicator(
             strokeWidth: 1.5,
-            color: Colors.grey[500],
+            color: AppColors.orange,
           ),
         );
       case 'sent':
-        return Icon(Icons.check, size: 14, color: Colors.grey[500]);
+        return const Icon(Icons.check, size: 14, color: AppColors.textSecondary);
       case 'delivered':
-        return Icon(Icons.done_all, size: 14, color: Colors.grey[500]);
+        return const Icon(Icons.done_all, size: 14, color: Color(0xFF22C55E));
       case 'read':
-        return Icon(
+        return const Icon(
           Icons.done_all,
           size: 14,
-          color: Colors.blue[400],
+          color: Color(0xFF38BDF8),
         );
       default:
-        return Icon(Icons.access_time, size: 14, color: Colors.grey[500]);
+        return const Icon(
+          Icons.access_time,
+          size: 14,
+          color: AppColors.textMuted,
+        );
     }
   }
 
   void _showEmojiPicker(BuildContext context) {
-    final emojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+    final emojis = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥'];
     showModalBottomSheet(
       context: context,
       builder: (ctx) => Padding(
@@ -88,12 +93,17 @@ class MessageBubble extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: alreadyReacted
-                          ? Colors.blue[50]
-                          : Colors.grey[100],
+                      gradient:
+                          alreadyReacted ? AppColors.primaryGradient : null,
+                      color: alreadyReacted ? null : AppColors.surfaceHigh,
                       borderRadius: BorderRadius.circular(20),
                       border: alreadyReacted
-                          ? Border.all(color: Colors.blue)
+                          ? Border.all(color: AppColors.coral)
+                          : Border.all(
+                              color: Colors.white.withValues(alpha: 0.08),
+                            ),
+                      boxShadow: alreadyReacted
+                          ? [AppColors.glow(opacity: 0.20)]
                           : null,
                     ),
                     child: Text(e, style: const TextStyle(fontSize: 28)),
@@ -178,14 +188,15 @@ class MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final time = DateFormat('HH:mm').format(message.createdAt);
     final alignment = isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start;
-    final bubbleColor =
-        isMe ? scheme.primaryContainer : scheme.surfaceContainerHighest;
-    final textColor =
-        isMe ? scheme.onPrimaryContainer : scheme.onSurfaceVariant;
+    final bubbleColor = isMe ? null : AppColors.surfaceHigh;
+    final textColor = AppColors.textPrimary;
     final metaColor = textColor.withValues(alpha: 0.72);
+    final reactionCounts = <String, List<Reaction>>{};
+    for (final reaction in message.reactions) {
+      reactionCounts.putIfAbsent(reaction.emoji, () => []).add(reaction);
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
@@ -209,18 +220,29 @@ class MessageBubble extends StatelessWidget {
               padding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
+                gradient: isMe ? AppColors.primaryGradient : null,
                 color: bubbleColor,
                 borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(18),
-                  topRight: const Radius.circular(18),
-                  bottomLeft: Radius.circular(isMe ? 18 : 6),
-                  bottomRight: Radius.circular(isMe ? 6 : 18),
+                  topLeft: const Radius.circular(22),
+                  topRight: const Radius.circular(22),
+                  bottomLeft: Radius.circular(isMe ? 22 : 8),
+                  bottomRight: Radius.circular(isMe ? 8 : 22),
                 ),
                 border: Border.all(
                   color: isMe
-                      ? scheme.primary.withValues(alpha: 0.12)
-                      : scheme.outline.withValues(alpha: 0.18),
+                      ? Colors.white.withValues(alpha: 0.16)
+                      : Colors.white.withValues(alpha: 0.08),
                 ),
+                boxShadow: [
+                  if (isMe)
+                    AppColors.glow(color: AppColors.pink, opacity: 0.20)
+                  else
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.22),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
+                ],
               ),
               child: Column(
                 crossAxisAlignment: alignment,
@@ -231,7 +253,9 @@ class MessageBubble extends StatelessWidget {
                       child: Text('@$senderUsername',
                           style: TextStyle(
                               fontSize: 11,
-                              color: scheme.primary,
+                              color: isMe
+                                  ? Colors.white.withValues(alpha: 0.92)
+                                  : AppColors.coral,
                               fontWeight: FontWeight.w500)),
                     ),
                   if (message.forwardedFrom != null &&
@@ -262,19 +286,20 @@ class MessageBubble extends StatelessWidget {
                         p: TextStyle(fontSize: 15, color: textColor),
                         strong: const TextStyle(
                             fontSize: 15, fontWeight: FontWeight.bold),
-                        code: TextStyle(
+                        code: const TextStyle(
                           fontSize: 13,
-                          backgroundColor: Colors.grey[200],
+                          backgroundColor: AppColors.backgroundAlt,
+                          color: AppColors.orange,
                           fontFamily: 'monospace',
                         ),
                         codeblockDecoration: BoxDecoration(
-                          color: Colors.grey[100],
-                          borderRadius: BorderRadius.circular(4),
+                          color: AppColors.backgroundAlt,
+                          borderRadius: BorderRadius.circular(10),
                         ),
                         blockquoteDecoration: BoxDecoration(
                           border: Border(
                             left: BorderSide(
-                              color: Colors.grey[400]!,
+                              color: AppColors.coral,
                               width: 3,
                             ),
                           ),
@@ -367,23 +392,46 @@ class MessageBubble extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Wrap(
-                        spacing: 2,
-                        children: message.reactions
-                            .map((r) => InkWell(
+                        spacing: 5,
+                        runSpacing: 4,
+                        children: reactionCounts.entries
+                            .map(
+                              (entry) => Tooltip(
+                                message: entry.value
+                                    .map((r) => r.userId)
+                                    .join(', '),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(18),
                                   onTap: onReact != null
-                                      ? () => onReact!(r.emoji)
+                                      ? () => onReact!(entry.key)
                                       : null,
-                                  child: Chip(
-                                    materialTapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                    label: Text(r.emoji,
-                                        style: const TextStyle(
-                                            fontSize: 12)),
-                                    padding: EdgeInsets.zero,
-                                    visualDensity:
-                                        VisualDensity.compact,
+                                  child: AnimatedContainer(
+                                    duration:
+                                        const Duration(milliseconds: 180),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.backgroundAlt
+                                          .withValues(alpha: 0.74),
+                                      borderRadius: BorderRadius.circular(18),
+                                      border: Border.all(
+                                        color: AppColors.coral
+                                            .withValues(alpha: 0.28),
+                                      ),
+                                      boxShadow: [
+                                        AppColors.glow(opacity: 0.14),
+                                      ],
+                                    ),
+                                    child: Text(
+                                      '${entry.key} ${entry.value.length}',
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
                                   ),
-                                ))
+                                ),
+                              ),
+                            )
                             .toList(),
                       ),
                     ),

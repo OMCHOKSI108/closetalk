@@ -1004,34 +1004,40 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             onLocation: _shareLocation,
             onPoll: _createPoll,
             onSend: (text) async {
-              final ok = await context.read<ChatProvider>().sendMessage(
+              final chat = context.read<ChatProvider>();
+              final messenger = ScaffoldMessenger.of(context);
+              final ok = await chat.sendMessage(
                     chatId: widget.chatId,
                     content: text,
                     replyToId: _replyToMessageId,
                   );
+              if (!mounted) return;
               _cancelReply();
               _typingDebounce?.cancel();
-              context.read<ChatProvider>().sendTyping(widget.chatId, false);
+              chat.sendTyping(widget.chatId, false);
               _scrollToLatest();
-              if (!ok && mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
+              if (!ok) {
+                messenger.showSnackBar(
                   const SnackBar(content: Text('Message failed to send')),
                 );
               }
             },
             onSendFormatted: (text) async {
-              final ok = await context.read<ChatProvider>().sendMessage(
+              final chat = context.read<ChatProvider>();
+              final messenger = ScaffoldMessenger.of(context);
+              final ok = await chat.sendMessage(
                     chatId: widget.chatId,
                     content: text,
                     contentType: 'formatted',
                     replyToId: _replyToMessageId,
                   );
+              if (!mounted) return;
               _cancelReply();
               _typingDebounce?.cancel();
-              context.read<ChatProvider>().sendTyping(widget.chatId, false);
+              chat.sendTyping(widget.chatId, false);
               _scrollToLatest();
-              if (!ok && mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
+              if (!ok) {
+                messenger.showSnackBar(
                   const SnackBar(content: Text('Message failed to send')),
                 );
               }

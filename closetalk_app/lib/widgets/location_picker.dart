@@ -11,26 +11,26 @@ class LocationPickerSheet extends StatefulWidget {
 }
 
 class _LocationPickerSheetState extends State<LocationPickerSheet> {
-  bool _loading = true;
+  bool _loading = false;
   Position? _position;
   String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _getLocation();
-  }
+  bool _serviceDisabled = false;
+  bool _permissionDeniedForever = false;
 
   Future<void> _getLocation() async {
     setState(() {
       _loading = true;
       _error = null;
+      _serviceDisabled = false;
+      _permissionDeniedForever = false;
     });
     try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
+        if (!mounted) return;
         setState(() {
-          _error = 'Location services are disabled';
+          _serviceDisabled = true;
+          _error = 'Location services are turned off.';
           _loading = false;
         });
         return;
@@ -40,8 +40,9 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
+          if (!mounted) return;
           setState(() {
-            _error = 'Location permission denied';
+            _error = 'Location permission is needed to share your current place.';
             _loading = false;
           });
           return;
@@ -49,8 +50,10 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
       }
 
       if (permission == LocationPermission.deniedForever) {
+        if (!mounted) return;
         setState(() {
-          _error = 'Location permission permanently denied';
+          _permissionDeniedForever = true;
+          _error = 'Location permission is blocked. Enable it from app settings.';
           _loading = false;
         });
         return;
@@ -63,7 +66,9 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
       );
       if (mounted) setState(() => _position = pos);
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      if (mounted) {
+        setState(() => _error = 'Could not fetch location. Please try again.');
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -78,10 +83,36 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Share Location',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              'Share Location',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 16),
-            if (_loading) const Expanded(child: Center(child: CircularProgressIndicator())),
+            if (!_loading && _error == null && _position == null)
+              Expanded(
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.my_location,
+                          size: 56, color: Colors.blue),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'CloseTalk needs location permission only when you share your live place in chat.',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton.icon(
+                        onPressed: _getLocation,
+                        icon: const Icon(Icons.location_searching),
+                        label: const Text('Allow Location'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            if (_loading)
+              const Expanded(child: Center(child: CircularProgressIndicator())),
             if (_error != null)
               Expanded(
                 child: Center(
@@ -92,10 +123,21 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
                       const SizedBox(height: 8),
                       Text(_error!, textAlign: TextAlign.center),
                       const SizedBox(height: 8),
-                      TextButton(
-                        onPressed: _getLocation,
-                        child: const Text('Retry'),
-                      ),
+                      if (_serviceDisabled)
+                        TextButton(
+                          onPressed: Geolocator.openLocationSettings,
+                          child: const Text('Open Location Settings'),
+                        )
+                      else if (_permissionDeniedForever)
+                        TextButton(
+                          onPressed: Geolocator.openAppSettings,
+                          child: const Text('Open App Settings'),
+                        )
+                      else
+                        TextButton(
+                          onPressed: _getLocation,
+                          child: const Text('Retry'),
+                        ),
                     ],
                   ),
                 ),

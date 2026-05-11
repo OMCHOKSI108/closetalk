@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:photo_manager/photo_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../services/notification_service.dart';
 import '../home_screen.dart';
 
 class PermissionsScreen extends StatefulWidget {
@@ -12,14 +15,27 @@ class PermissionsScreen extends StatefulWidget {
 class _PermissionsScreenState extends State<PermissionsScreen> {
   bool _notificationsGranted = false;
   bool _storageGranted = false;
+  bool _locationGranted = false;
   bool _isDone = false;
 
   Future<void> _requestNotifications() async {
-    setState(() => _notificationsGranted = true);
+    final granted = await NotificationService().requestPermission();
+    if (mounted) setState(() => _notificationsGranted = granted);
   }
 
   Future<void> _requestStorage() async {
-    setState(() => _storageGranted = true);
+    final permission = await PhotoManager.requestPermissionExtend();
+    if (mounted) setState(() => _storageGranted = permission.hasAccess);
+  }
+
+  Future<void> _requestLocation() async {
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    final granted = permission == LocationPermission.always ||
+        permission == LocationPermission.whileInUse;
+    if (mounted) setState(() => _locationGranted = granted);
   }
 
   Future<void> _finish() async {
@@ -71,6 +87,14 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
                 subtitle: 'Send photos and media',
                 granted: _storageGranted,
                 onRequest: _requestStorage,
+              ),
+              const SizedBox(height: 12),
+              _PermissionTile(
+                icon: Icons.location_on_outlined,
+                title: 'Location',
+                subtitle: 'Share your current place in chats',
+                granted: _locationGranted,
+                onRequest: _requestLocation,
               ),
               const Spacer(flex: 2),
               SizedBox(

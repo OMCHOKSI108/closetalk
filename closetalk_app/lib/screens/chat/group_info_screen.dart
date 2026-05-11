@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../models/group.dart';
 import '../../services/group_service.dart';
+import '../../theme/app_theme.dart';
 import 'add_members_screen.dart';
 
 class GroupInfoScreen extends StatefulWidget {
@@ -103,7 +105,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         children: [
           CircleAvatar(
             radius: 40,
-            child: Text(group.name[0].toUpperCase()),
+            backgroundColor: AppColors.surfaceHigh,
+            child: Text(group.name.isNotEmpty ? group.name[0].toUpperCase() : '?'),
           ),
           const SizedBox(height: 8),
           Text(group.name,
@@ -186,40 +189,43 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             title: const Text('Block group'),
             onTap: _blockGroup,
           ),
-          if (isAdmin) ...[
-            ListTile(
-              leading: const Icon(Icons.exit_to_app),
-              title: const Text('Leave group'),
-              onTap: () async {
-                final confirm = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text('Leave group?'),
-                    content: const Text('This cannot be undone.'),
-                    actions: [
-                      TextButton(
-                          onPressed: () => Navigator.pop(ctx, false),
-                          child: const Text('Cancel')),
-                      TextButton(
-                          onPressed: () => Navigator.pop(ctx, true),
-                          child: const Text('Leave',
-                              style: TextStyle(color: Colors.red))),
-                    ],
-                  ),
-                );
-                if (confirm == true) {
-                  await groupService.leaveGroup(group.id);
-                  if (context.mounted) Navigator.of(context).pop(true);
-                }
-              },
-            ),
-          ],
+          ListTile(
+            leading: const Icon(Icons.exit_to_app, color: AppColors.orange),
+            title: const Text('Leave group'),
+            onTap: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Leave group?'),
+                  content: const Text('You can rejoin later if the group allows it.'),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text('Cancel')),
+                    TextButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text('Leave')),
+                  ],
+                ),
+              );
+              if (confirm == true) {
+                await groupService.leaveGroup(group.id);
+                if (context.mounted) Navigator.of(context).pop(true);
+              }
+            },
+          ),
 
           const Divider(),
           const Text('Members',
               style: TextStyle(fontWeight: FontWeight.bold)),
           ...group.members.map((m) => ListTile(
-                leading: CircleAvatar(child: Text(m.displayName[0])),
+                leading: CircleAvatar(
+                  child: Text(
+                    m.displayName.isNotEmpty
+                        ? m.displayName[0].toUpperCase()
+                        : '?',
+                  ),
+                ),
                 title: Text(m.displayName),
                 subtitle: Text(m.role),
                 trailing: isAdmin && m.role == 'member'
@@ -315,38 +321,124 @@ class _InviteLinkScreenState extends State<_InviteLinkScreen> {
     }
   }
 
+  Future<void> _copy(String value, String label) async {
+    await Clipboard.setData(ClipboardData(text: value));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$label copied')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Invite Link')),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (_invite != null) ...[
-                const Icon(Icons.link, size: 64),
-                const SizedBox(height: 16),
-                SelectableText(
-                  _invite!.url,
-                  style: Theme.of(context).textTheme.titleMedium,
-                  textAlign: TextAlign.center,
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceHigh.withValues(alpha: 0.72),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            ),
+            child: Column(
+              children: [
+                const Icon(Icons.link_rounded, size: 52, color: AppColors.orange),
+                const SizedBox(height: 12),
+                Text(
+                  'Invite people',
+                  style: Theme.of(context).textTheme.titleLarge,
                 ),
-                const SizedBox(height: 8),
-                Text('Expires: ${_invite!.expiresAt}'),
-                const SizedBox(height: 16),
+                const SizedBox(height: 6),
+                Text(
+                  'Generate a fresh invite code and share it with people you trust.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ],
-              ElevatedButton.icon(
-                onPressed: _isLoading ? null : _generate,
-                icon: _isLoading
-                    ? const CircularProgressIndicator()
-                    : const Icon(Icons.refresh),
-                label: Text(_invite == null ? 'Generate Link' : 'Regenerate'),
-              ),
-            ],
+            ),
           ),
-        ),
+          const SizedBox(height: 18),
+          if (_invite != null) ...[
+            _InviteValueCard(
+              title: 'Invite code',
+              value: _invite!.code,
+              onCopy: () => _copy(_invite!.code, 'Invite code'),
+            ),
+            const SizedBox(height: 12),
+            _InviteValueCard(
+              title: 'Invite link',
+              value: _invite!.url,
+              onCopy: () => _copy(_invite!.url, 'Invite link'),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Expires: ${_invite!.expiresAt}',
+              style: Theme.of(context).textTheme.bodySmall,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 18),
+          ],
+          ElevatedButton.icon(
+            onPressed: _isLoading ? null : _generate,
+            icon: _isLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded),
+            label: Text(_invite == null ? 'Generate Invite' : 'Regenerate'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InviteValueCard extends StatelessWidget {
+  final String title;
+  final String value;
+  final VoidCallback onCopy;
+
+  const _InviteValueCard({
+    required this.title,
+    required this.value,
+    required this.onCopy,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.backgroundAlt,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: Theme.of(context).textTheme.labelMedium),
+                const SizedBox(height: 4),
+                SelectableText(
+                  value,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Copy',
+            onPressed: onCopy,
+            icon: const Icon(Icons.copy_rounded),
+          ),
+        ],
       ),
     );
   }

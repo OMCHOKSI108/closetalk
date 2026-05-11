@@ -153,7 +153,7 @@ class _RequestList extends StatelessWidget {
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(12),
       itemCount: contacts.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
+      separatorBuilder: (_, separatorIndex) => const Divider(height: 1),
       itemBuilder: (_, index) {
         final contact = contacts[index];
         final busy = working.contains(contact.contactId);

@@ -25,7 +25,7 @@ class GroupService {
       if (resp.statusCode == 201) {
         return Group.fromJson(jsonDecode(body) as Map<String, dynamic>);
       }
-      throw HttpException('Failed to create group: ${resp.statusCode}');
+      throw HttpException(_messageFromBody(body, 'Failed to create group'));
     } finally {
       client.close();
     }
@@ -42,7 +42,7 @@ class GroupService {
       if (resp.statusCode == 200) {
         return Group.fromJson(jsonDecode(body) as Map<String, dynamic>);
       }
-      throw HttpException('Failed to get group: ${resp.statusCode}');
+      throw HttpException(_messageFromBody(body, 'Failed to get group'));
     } finally {
       client.close();
     }
@@ -80,7 +80,7 @@ class GroupService {
         return InviteResponse.fromJson(
             jsonDecode(body) as Map<String, dynamic>);
       }
-      throw HttpException('Failed to generate invite: ${resp.statusCode}');
+      throw HttpException(_messageFromBody(body, 'Failed to generate invite'));
     } finally {
       client.close();
     }
@@ -261,5 +261,16 @@ class GroupService {
     } finally {
       client.close();
     }
+  }
+
+  String _messageFromBody(String body, String fallback) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) {
+        final message = decoded['message'] ?? decoded['error'];
+        if (message is String && message.trim().isNotEmpty) return message;
+      }
+    } catch (_) {}
+    return fallback;
   }
 }

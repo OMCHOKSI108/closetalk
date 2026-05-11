@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../theme/app_theme.dart';
 
 class ChatInputBar extends StatefulWidget {
   final FutureOr<void> Function(String text) onSend;
@@ -144,7 +145,6 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return AnimatedPadding(
       duration: const Duration(milliseconds: 160),
       curve: Curves.easeOut,
@@ -152,11 +152,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
       child: Container(
         padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
         decoration: BoxDecoration(
-          color: scheme.surface,
+          color: AppColors.background.withValues(alpha: 0.92),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 18,
+              color: AppColors.coral.withValues(alpha: 0.10),
+              blurRadius: 24,
               offset: const Offset(0, -4),
             ),
           ],
@@ -171,12 +171,16 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(14),
+                    color: AppColors.surfaceHigh.withValues(alpha: 0.84),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: AppColors.coral.withValues(alpha: 0.18),
+                    ),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.reply, size: 16, color: scheme.primary),
+                      const Icon(Icons.reply,
+                          size: 16, color: AppColors.coral),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
@@ -192,7 +196,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
                           child: Padding(
                             padding: const EdgeInsets.all(4),
                             child:
-                                Icon(Icons.close, size: 16, color: scheme.primary),
+                                const Icon(Icons.close,
+                                    size: 16, color: AppColors.coral),
                           ),
                         ),
                     ],
@@ -212,11 +217,18 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     child: Container(
                       constraints: const BoxConstraints(minHeight: 46),
                       decoration: BoxDecoration(
-                        color: scheme.surfaceContainerHighest,
+                        color: AppColors.surfaceHigh.withValues(alpha: 0.86),
                         borderRadius: BorderRadius.circular(24),
                         border: Border.all(
-                          color: scheme.outline.withValues(alpha: 0.2),
+                          color: Colors.white.withValues(alpha: 0.08),
                         ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.18),
+                            blurRadius: 16,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
                       ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.end,
@@ -264,9 +276,18 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Material(
-                    color: _hasText ? scheme.primary : scheme.primaryContainer,
-                    shape: const CircleBorder(),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: _hasText ? AppColors.primaryGradient : null,
+                      color: _hasText ? null : AppColors.surfaceHigh,
+                      boxShadow: _hasText
+                          ? [AppColors.glow(opacity: 0.32)]
+                          : null,
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      shape: const CircleBorder(),
                     child: InkWell(
                       customBorder: const CircleBorder(),
                       onTap: _hasText ? _send : widget.onRecord,
@@ -288,19 +309,20 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                   height: 18,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
-                                    color: scheme.onPrimary,
+                                    color: AppColors.textPrimary,
                                   ),
                                 )
                               : Icon(
                                   _hasText ? Icons.send_rounded : Icons.mic,
                                   key: ValueKey(_hasText ? 'send' : 'mic'),
                                   color: _hasText
-                                      ? scheme.onPrimary
-                                      : scheme.onPrimaryContainer,
+                                      ? AppColors.textPrimary
+                                      : AppColors.textSecondary,
                                 ),
                         ),
                       ),
                     ),
+                  ),
                   ),
                 ],
               ),
@@ -327,13 +349,12 @@ class _ComposerIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return IconButton(
       visualDensity: VisualDensity.compact,
       tooltip: tooltip,
       icon: Icon(
         icon,
-        color: selected ? scheme.primary : scheme.onSurfaceVariant,
+        color: selected ? AppColors.coral : AppColors.textSecondary,
       ),
       onPressed: onPressed,
     );
