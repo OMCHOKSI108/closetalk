@@ -204,13 +204,19 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
   Future<void> _sendMessage() async {
     final cp = context.read<ContactProvider>();
-    final conv = await cp.createDirectConversation(widget.userId);
-    if (!mounted || conv == null) return;
+    final result = await cp.createDirectConversation(widget.userId);
+    if (!mounted) return;
+    if (!result.success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.error ?? 'Could not start chat')),
+      );
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => ChatDetailScreen(
-          chatId: conv.chatId,
+          chatId: result.conv!.chatId,
           chatTitle: widget.displayName,
         ),
       ),
@@ -263,11 +269,17 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                children: [
-                  UserAvatar(
+          : LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: constraints.maxHeight - 48,
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      UserAvatar(
                     imageUrl: widget.avatarUrl,
                     name: widget.displayName,
                     radius: 48,
@@ -359,13 +371,32 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                           ),
                         ],
                       ),
+                    if (_contactStatus == 'rejected')
+                      Column(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Text(
+                              'Friend request was rejected',
+                              style: TextStyle(color: Colors.grey[600]),
+                            ),
+                          ),
+                          _buildActionButton(
+                            icon: Icons.refresh,
+                            label: 'Send Again',
+                            onPressed: _sendRequest,
+                          ),
+                        ],
+                      ),
                     if (_contactStatus == 'blocked')
                       Text(
                         'User blocked',
                         style: TextStyle(color: Colors.grey[600]),
                       ),
                   ],
-                ],
+                    ],
+                  ),
+                ),
               ),
             ),
     );

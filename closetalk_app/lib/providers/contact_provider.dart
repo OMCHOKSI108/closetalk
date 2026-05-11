@@ -259,7 +259,7 @@ class ContactProvider extends ChangeNotifier {
     }
   }
 
-  Future<DirectConversationResponse?> createDirectConversation(
+  Future<DirectConversationResult> createDirectConversation(
     String userId,
   ) async {
     try {
@@ -274,15 +274,21 @@ class ContactProvider extends ChangeNotifier {
         final resp = await req.close();
         final body = await resp.transform(utf8.decoder).join();
         if (resp.statusCode == 200) {
-          return DirectConversationResponse.fromJson(
-            jsonDecode(body) as Map<String, dynamic>,
+          return DirectConversationResult(
+            conv: DirectConversationResponse.fromJson(
+              jsonDecode(body) as Map<String, dynamic>,
+            ),
           );
         }
+        return DirectConversationResult(
+          error: _errorFromBody(body, resp.statusCode),
+        );
       } finally {
         client.close();
       }
-    } catch (_) {}
-    return null;
+    } catch (e) {
+      return DirectConversationResult(error: 'Network error: $e');
+    }
   }
 
   void _addToSearchHistory(String query) {
@@ -338,4 +344,13 @@ class UserSearchResult {
   const UserSearchResult({required this.users, this.error, this.statusCode});
 
   bool get hasError => error != null;
+}
+
+class DirectConversationResult {
+  final DirectConversationResponse? conv;
+  final String? error;
+
+  const DirectConversationResult({this.conv, this.error});
+
+  bool get success => conv != null;
 }

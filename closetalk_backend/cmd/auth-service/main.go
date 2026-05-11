@@ -2289,9 +2289,12 @@ func handleRejectContactRequest(w http.ResponseWriter, r *http.Request) {
 
 	ctx := context.Background()
 
-	// Remove both contact rows
+	// Mark both rows as rejected (retain row so sender can see status and re-send).
+	// Don't downgrade if already accepted or blocked.
 	database.Pool.Exec(ctx,
-		`DELETE FROM contacts WHERE (user_id = $1 AND contact_id = $2) OR (user_id = $2 AND contact_id = $1)`,
+		`UPDATE contacts SET status = 'rejected', updated_at = now()
+		 WHERE ((user_id = $1 AND contact_id = $2) OR (user_id = $2 AND contact_id = $1))
+		   AND status NOT IN ('accepted', 'blocked')`,
 		userID, req.ContactID,
 	)
 
@@ -2404,12 +2407,30 @@ func handleCreateDirectConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "user_id is required"})
 		return
 	}
+	if req.UserID == userID {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "cannot start a conversation with yourself"})
+		return
+	}
 
 	ctx := context.Background()
 
+	// Only accepted friends can start a private chat.
+	var status string
+	err := database.Pool.QueryRow(ctx,
+		`SELECT status FROM contacts WHERE user_id = $1 AND contact_id = $2`,
+		userID, req.UserID,
+	).Scan(&status)
+	if err != nil || status != string(model.ContactAccepted) {
+		writeError(w, http.StatusForbidden, &model.AppError{
+			Code:    "NOT_FRIENDS",
+			Message: "you can only message accepted friends",
+		})
+		return
+	}
+
 	// Check if conversation already exists
 	var chatID string
-	err := database.Pool.QueryRow(ctx,
+	err = database.Pool.QueryRow(ctx,
 		`SELECT c.id FROM conversations c
 		 JOIN conversation_participants p1 ON p1.conversation_id = c.id AND p1.user_id = $1
 		 JOIN conversation_participants p2 ON p2.conversation_id = c.id AND p2.user_id = $2

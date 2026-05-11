@@ -420,14 +420,12 @@ resource "aws_lb_listener" "http" {
   port              = 80
   protocol          = "HTTP"
 
+  # Default catch-all routes to auth-service so new auth-service endpoints
+  # don't require an ALB rule update. Message-service paths still take priority
+  # via their explicit listener rules below.
   default_action {
-    type = "fixed-response"
-
-    fixed_response {
-      content_type = "application/json"
-      message_body = "{\"error\":\"not found\",\"message\":\"Use CloudFront HTTPS endpoint for API access\"}"
-      status_code  = "404"
-    }
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.auth_service.arn
   }
 }
 
@@ -708,9 +706,25 @@ resource "aws_lb_listener_rule" "auth_service" {
     target_group_arn = aws_lb_target_group.auth_service.arn
   }
 
+  # ALB caps each path-pattern condition at 5 values; auth-service uses two rules.
   condition {
     path_pattern {
-      values = ["/", "/auth/*", "/devices", "/devices/*", "/groups/*", "/users/*", "/health"]
+      values = ["/", "/auth/*", "/devices/*", "/groups/*", "/health"]
+    }
+  }
+}
+
+resource "aws_lb_listener_rule" "auth_service_extra" {
+  listener_arn = aws_lb_listener.http.arn
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.auth_service.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/users/*", "/devices"]
     }
   }
 }

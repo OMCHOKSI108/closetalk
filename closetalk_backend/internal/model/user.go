@@ -165,6 +165,7 @@ const (
 	ContactSent     ContactStatus = "sent"
 	ContactAccepted ContactStatus = "accepted"
 	ContactBlocked  ContactStatus = "blocked"
+	ContactRejected ContactStatus = "rejected"
 )
 
 type ContactRequest struct {
