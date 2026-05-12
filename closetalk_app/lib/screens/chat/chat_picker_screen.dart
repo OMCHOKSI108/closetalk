@@ -33,12 +33,12 @@ class _ChatPickerScreenState extends State<ChatPickerScreen> {
 
   Future<void> _load() async {
     final convMap = <String, _Conv>{};
-    final sync = SyncService(
-      baseUrl: ApiConfig.baseUrl,
-      getToken: () => ApiConfig.token ?? '',
-    );
 
     try {
+      final sync = SyncService(
+        baseUrl: ApiConfig.baseUrl,
+        getToken: () => ApiConfig.token ?? '',
+      );
       await sync.fullSync(
         onBatch: (messages) {
           for (final msg in messages) {
@@ -54,6 +54,22 @@ class _ChatPickerScreenState extends State<ChatPickerScreen> {
           }
         },
       );
+    } catch (_) {}
+
+    // Fallback: add contacts with conversationId that aren't already in the map
+    try {
+      final contacts = context.read<ContactProvider>();
+      if (contacts.contacts.isEmpty) await contacts.loadContacts();
+      for (final c in contacts.contacts) {
+        if (c.conversationId != null && !convMap.containsKey(c.conversationId)) {
+          convMap[c.conversationId!] = _Conv(
+            chatId: c.conversationId!,
+            lastMessage: '',
+            lastTime: c.createdAt,
+            senderId: c.contactId,
+          );
+        }
+      }
     } catch (_) {}
 
     if (!mounted) return;

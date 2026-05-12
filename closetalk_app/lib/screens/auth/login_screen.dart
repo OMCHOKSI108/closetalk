@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../providers/auth_provider.dart';
 import 'register_screen.dart';
 import '../home_screen.dart';
@@ -129,10 +130,13 @@ class _LoginScreenState extends State<LoginScreen> {
         title: const Text('GitHub Login'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Paste the authorization code from GitHub to sign in.',
-            ),
+            const Text('1. Tap the button below to open GitHub.'),
+            const SizedBox(height: 4),
+            const Text('2. Authorize the app.'),
+            const SizedBox(height: 4),
+            const Text('3. Copy the code shown and paste below.'),
             const SizedBox(height: 16),
             TextField(
               controller: codeCtl,
@@ -147,6 +151,16 @@ class _LoginScreenState extends State<LoginScreen> {
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final url = 'https://github.com/login/oauth/authorize?client_id=Ov23lii5eFv1COAM8LIO&scope=user:email';
+              final uri = Uri.parse(url);
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              }
+            },
+            child: const Text('Open GitHub'),
           ),
           TextButton(
             onPressed: () async {

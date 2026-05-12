@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../services/api_config.dart';
+import '../services/webrtc_service.dart';
 
 enum CallStatus { idle, calling, ringing, connected, ended }
 
@@ -17,12 +18,15 @@ class CallProvider extends ChangeNotifier {
 
   WebSocketChannel? _channel;
   StreamSubscription? _wsSubscription;
+  WebRTCService? _webrtc;
+  StreamSubscription? _signalSub;
 
   CallStatus get status => _status;
   String? get remoteUserId => _remoteUserId;
   String? get remoteDisplayName => _remoteDisplayName;
   bool get isVideo => _isVideo;
   int get callDuration => _callDuration;
+  WebRTCService? get webrtc => _webrtc;
 
   void connectSignaling(String token, String chatId) {
     disconnectSignaling();
@@ -46,11 +50,12 @@ class CallProvider extends ChangeNotifier {
   }
 
   void disconnectSignaling() {
+    _signalSub?.cancel();
     _wsSubscription?.cancel();
     _channel?.sink.close();
   }
 
-  void _handleSignal(Map<String, dynamic> msg) {
+  Future<void> _handleSignal(Map<String, dynamic> msg) async {
     final type = msg['type'] as String?;
     final payload = msg['payload'] as Map<String, dynamic>?;
     if (payload == null) return;
@@ -63,32 +68,70 @@ class CallProvider extends ChangeNotifier {
         _status = CallStatus.ringing;
         notifyListeners();
         break;
-      case 'call.answered':
+      case 'call.offer':
+        if (_webrtc == null) await _initWebRTC();
+        await _webrtc!.setRemoteDescription(payload['sdp'] as Map<String, dynamic>);
+        _webrtc!.applyPendingCandidates();
+        final answer = await _webrtc!.createAnswer();
+        _sendSignal('call.answer', {'chat_id': _chatId, 'sdp': answer});
         _status = CallStatus.connected;
         _startTimer();
         notifyListeners();
         break;
+      case 'call.answer':
+        if (_webrtc != null) {
+          await _webrtc!.setRemoteDescription(payload['sdp'] as Map<String, dynamic>);
+          _webrtc!.applyPendingCandidates();
+          _status = CallStatus.connected;
+          _startTimer();
+          notifyListeners();
+        }
+        break;
+      case 'call.ice':
+        if (_webrtc != null) {
+          await _webrtc!.addIceCandidate(payload['candidate'] as Map<String, dynamic>);
+        }
+        break;
       case 'call.ended':
+        _endCall();
+        break;
+      case 'call.reject':
         _endCall();
         break;
     }
   }
 
-  void startCall(String targetUserId, String chatId, bool video) {
+  Future<void> startCall(String targetUserId, String chatId, bool video) async {
     _isVideo = video;
     _remoteUserId = targetUserId;
     _chatId = chatId;
     _status = CallStatus.calling;
     notifyListeners();
 
+    await _initWebRTC();
+    if (video) {
+      await _webrtc!.startLocalVideo();
+    } else {
+      await _webrtc!.startLocalAudio();
+    }
+
+    final offer = await _webrtc!.createOffer();
     _sendSignal('call.offer', {
       'target_user_id': targetUserId,
       'chat_id': chatId,
       'is_video': video,
+      'sdp': offer,
     });
   }
 
-  void answerCall() {
+  Future<void> answerCall() async {
+    await _initWebRTC();
+    final isVideoCall = _isVideo;
+    if (isVideoCall) {
+      await _webrtc!.startLocalVideo();
+    } else {
+      await _webrtc!.startLocalAudio();
+    }
     _status = CallStatus.connected;
     _startTimer();
     _sendSignal('call.answer', {'chat_id': _chatId});
@@ -100,8 +143,10 @@ class CallProvider extends ChangeNotifier {
     _reset();
   }
 
-  void endCall() {
+  Future<void> endCall() async {
     _sendSignal('call.end', {'chat_id': _chatId});
+    await _webrtc?.dispose();
+    _webrtc = null;
     _endCall();
   }
 
@@ -136,18 +181,42 @@ class CallProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
+  Future<void> _initWebRTC() async {
+    if (_webrtc != null) return;
+    _webrtc = WebRTCService();
+    await _webrtc!.init();
+    _signalSub = _webrtc!.signalStream.listen((signal) {
+      if (signal['type'] == 'call.ice') {
+        _sendSignal('call.ice', {
+          'chat_id': _chatId,
+          'target_user_id': _remoteUserId,
+          'candidate': signal['candidate'],
+        });
+      } else if (signal['type'] == 'call.ended') {
+        _endCall();
+      }
+    });
+  }
+
+  Future<void> toggleMute() async {
+    await _webrtc?.toggleMute();
+  }
+
+  Future<void> toggleSpeaker(bool on) async {
+    await _webrtc?.toggleSpeaker(on);
+  }
+
   void _reset() {
     _stopTimer();
     _callDuration = 0;
     _status = CallStatus.idle;
     _remoteUserId = null;
     _remoteDisplayName = null;
-    notifyListeners();
   }
 
   @override
   void dispose() {
-    endCall();
+    _webrtc?.dispose();
     disconnectSignaling();
     super.dispose();
   }

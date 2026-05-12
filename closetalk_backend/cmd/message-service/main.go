@@ -299,6 +299,25 @@ func (c *wsClient) readPump() {
 			}
 		case "pong":
 			c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		case "call.offer", "call.answer", "call.ice", "call.end", "call.reject":
+			payload, ok := wsMsg.Payload.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			var targetUserID string
+			if tid, ok := payload["target_user_id"]; ok {
+				targetUserID, _ = tid.(string)
+			}
+			if targetUserID == "" {
+				if cid, ok := payload["chat_id"]; ok {
+					targetUserID, _ = cid.(string)
+				}
+			}
+			if targetUserID == "" {
+				targetUserID = c.userID
+			}
+			data, _ := json.Marshal(wsMsg)
+			hub.broadcastToUserDevices(targetUserID, data, "")
 		}
 	}
 }

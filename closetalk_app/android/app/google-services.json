@@ -12,7 +12,12 @@
           "package_name": "com.example.closetalk_app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "949959049074-bhat7keh5bggkv1pkogesrj5hjerfcjk.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyB7PoxojAC-E4rcIW6GLgiYR0kBQYH4gX0"

@@ -23,7 +23,9 @@ class GroupService {
       final resp = await req.close();
       final body = await resp.transform(utf8.decoder).join();
       if (resp.statusCode == 201) {
-        return Group.fromJson(jsonDecode(body) as Map<String, dynamic>);
+        final data = jsonDecode(body) as Map<String, dynamic>;
+        final groupId = data['group_id'] as String;
+        return getGroup(groupId);
       }
       throw HttpException(_messageFromBody(body, 'Failed to create group'));
     } finally {

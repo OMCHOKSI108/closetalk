@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 import '../../providers/call_provider.dart';
 
@@ -18,26 +19,9 @@ class CallScreen extends StatefulWidget {
   State<CallScreen> createState() => _CallScreenState();
 }
 
-class _CallScreenState extends State<CallScreen>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _pulseAnim;
+class _CallScreenState extends State<CallScreen> {
   bool _isMuted = false;
   bool _isSpeakerOn = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _pulseAnim = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1500),
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _pulseAnim.dispose();
-    super.dispose();
-  }
 
   String _formatDuration(int seconds) {
     final m = (seconds ~/ 60).toString().padLeft(2, '0');
@@ -48,24 +32,57 @@ class _CallScreenState extends State<CallScreen>
   @override
   Widget build(BuildContext context) {
     final call = context.watch<CallProvider>();
+    final webrtc = call.webrtc;
 
     return Scaffold(
       backgroundColor: Colors.black87,
       body: SafeArea(
         child: Column(
           children: [
-            const Spacer(),
-            CircleAvatar(
-              radius: 48,
-              backgroundColor: Colors.brown[300],
-              child: Text(
-                (widget.remoteDisplayName ?? widget.remoteUserId)[0]
-                    .toUpperCase(),
-                style: const TextStyle(
-                    fontSize: 40, color: Colors.white),
+            // Video area for video calls
+            if (widget.isVideo && webrtc != null) ...[
+              Expanded(
+                child: Stack(
+                  children: [
+                    // Remote video
+                    if (call.status == CallStatus.connected)
+                      Container(
+                        color: Colors.black,
+                        child: RTCVideoView(webrtc.remoteRenderer, mirror: false),
+                      )
+                    else
+                      const Center(child: CircularProgressIndicator(color: Colors.white)),
+                    // Local preview (PiP)
+                    Positioned(
+                      top: 16,
+                      right: 16,
+                      child: SizedBox(
+                        width: 120,
+                        height: 180,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: RTCVideoView(webrtc.localRenderer, mirror: true),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
+            ],
+            if (!widget.isVideo) const Spacer(),
+            // Avatar for audio calls
+            if (!widget.isVideo) ...[
+              CircleAvatar(
+                radius: 48,
+                backgroundColor: Colors.brown[300],
+                child: Text(
+                  (widget.remoteDisplayName ?? widget.remoteUserId)[0]
+                      .toUpperCase(),
+                  style: const TextStyle(fontSize: 40, color: Colors.white),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
             Text(
               widget.remoteDisplayName ?? widget.remoteUserId,
               style: const TextStyle(
@@ -82,8 +99,7 @@ class _CallScreenState extends State<CallScreen>
                       : call.status == CallStatus.connected
                           ? _formatDuration(call.callDuration)
                           : 'Call ended',
-              style: TextStyle(
-                  fontSize: 16, color: Colors.grey[400]),
+              style: TextStyle(fontSize: 16, color: Colors.grey[400]),
             ),
             const SizedBox(height: 40),
             if (call.status == CallStatus.ringing) ...[
@@ -93,9 +109,7 @@ class _CallScreenState extends State<CallScreen>
                   _CallActionButton(
                     icon: Icons.call,
                     color: Colors.green,
-                    onPressed: () {
-                      call.answerCall();
-                    },
+                    onPressed: () => call.answerCall(),
                   ),
                   const SizedBox(width: 48),
                   _CallActionButton(
@@ -113,8 +127,8 @@ class _CallScreenState extends State<CallScreen>
                 icon: Icons.call_end,
                 color: Colors.red,
                 size: 64,
-                onPressed: () {
-                  call.endCall();
+                onPressed: () async {
+                  await call.endCall();
                   Navigator.pop(context);
                 },
               ),
@@ -125,26 +139,29 @@ class _CallScreenState extends State<CallScreen>
                   _CallActionButton(
                     icon: _isMuted ? Icons.mic_off : Icons.mic,
                     color: _isMuted ? Colors.red : Colors.white54,
-                    onPressed: () => setState(() => _isMuted = !_isMuted),
+                    onPressed: () async {
+                      await call.toggleMute();
+                      setState(() => _isMuted = !_isMuted);
+                    },
                   ),
                   const SizedBox(width: 32),
                   _CallActionButton(
                     icon: Icons.call_end,
                     color: Colors.red,
                     size: 64,
-                    onPressed: () {
-                      call.endCall();
+                    onPressed: () async {
+                      await call.endCall();
                       Navigator.pop(context);
                     },
                   ),
                   const SizedBox(width: 32),
                   _CallActionButton(
-                    icon: _isSpeakerOn
-                        ? Icons.volume_up
-                        : Icons.volume_down,
+                    icon: _isSpeakerOn ? Icons.volume_up : Icons.volume_down,
                     color: _isSpeakerOn ? Colors.blue : Colors.white54,
-                    onPressed: () =>
-                        setState(() => _isSpeakerOn = !_isSpeakerOn),
+                    onPressed: () async {
+                      await call.toggleSpeaker(!_isSpeakerOn);
+                      setState(() => _isSpeakerOn = !_isSpeakerOn);
+                    },
                   ),
                 ],
               ),

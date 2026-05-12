@@ -5,6 +5,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:http/http.dart' as http;
 import '../models/message.dart';
 import '../services/api_config.dart';
+import '../services/local_storage_service.dart';
 import 'e2ee_provider.dart';
 
 class ChatProvider extends ChangeNotifier {
@@ -82,6 +83,15 @@ class ChatProvider extends ChangeNotifier {
       _hasMore[chatId] = true;
     }
 
+    // Load cached messages first
+    if ((_messages[chatId] ?? []).isEmpty && !refresh) {
+      final cached = await LocalStorageService.getCachedMessages(chatId);
+      if (cached.isNotEmpty) {
+        _messages[chatId] = cached;
+        _safeNotifyListeners();
+      }
+    }
+
     if (!(_hasMore[chatId] ?? true)) return;
 
     try {
@@ -112,6 +122,7 @@ class ChatProvider extends ChangeNotifier {
           ];
           _nextCursors[chatId] = paginated.nextCursor;
           _hasMore[chatId] = paginated.hasMore;
+          LocalStorageService.cacheMessages(chatId, _messages[chatId]!);
           _safeNotifyListeners();
         }
       } finally {
@@ -185,6 +196,7 @@ class ChatProvider extends ChangeNotifier {
             }
           } catch (_) {}
           _replaceLocalMessage(chatId, tempId, sent);
+          LocalStorageService.cacheMessages(chatId, _messages[chatId]!);
           return true;
         }
 
@@ -536,6 +548,7 @@ class ChatProvider extends ChangeNotifier {
         _unreadCounts[msgChatId] = (_unreadCounts[msgChatId] ?? 0) + 1;
       }
 
+      LocalStorageService.cacheMessages(msgChatId, _messages[msgChatId]!);
       _safeNotifyListeners();
     } else if (type == 'message.status') {
       final messageId = payload['message_id'] as String?;

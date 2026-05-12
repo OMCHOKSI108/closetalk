@@ -1,11 +1,13 @@
-import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/chat_provider.dart';
+import '../../services/media_service.dart';
 import '../chat/chat_picker_screen.dart';
 
 class PhotoViewerScreen extends StatefulWidget {
@@ -29,24 +31,43 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
 
     setState(() => _sending = true);
     try {
-      final Uint8List? bytes = await widget.asset.thumbnailDataWithSize(
+      final bytes = await widget.asset.thumbnailDataWithSize(
         const ThumbnailSize.square(1280),
       );
       if (bytes == null) throw 'Could not read image bytes';
-      final b64 = base64Encode(bytes);
+
+      final dir = await getTemporaryDirectory();
+      final tempFile = File('${dir.path}/${DateTime.now().microsecondsSinceEpoch}.jpg');
+      await tempFile.writeAsBytes(bytes);
+
+      final result = await MediaService.uploadFile(
+        filePath: tempFile.path,
+        fileName: tempFile.uri.pathSegments.last,
+        contentType: 'image/jpeg',
+        folder: 'uploads/images',
+      );
+
+      if (result.mediaUrl == null) {
+        throw result.error ?? 'Upload failed';
+      }
 
       if (!mounted) return;
       final chat = context.read<ChatProvider>();
-      await chat.sendMessage(
+      final sent = await chat.sendMessage(
         chatId: picked.chatId,
-        content: b64,
+        content: '📷 Photo',
         contentType: 'image',
+        mediaUrl: result.mediaUrl,
       );
 
+      await tempFile.delete();
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Sent to ${picked.title}')),
-        );
+        if (sent) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Sent to ${picked.title}')),
+          );
+        }
         Navigator.pop(context);
       }
     } catch (e) {
