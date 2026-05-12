@@ -2,7 +2,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import '../models/message.dart';
+import '../providers/filter_provider.dart';
 import '../theme/app_theme.dart';
 import 'voice_message_content.dart';
 import 'location_content.dart';
@@ -193,6 +195,8 @@ class MessageBubble extends StatelessWidget {
     final bubbleColor = isMe ? null : AppColors.surfaceHigh;
     final textColor = AppColors.textPrimary;
     final metaColor = textColor.withValues(alpha: 0.72);
+    final fp = context.read<FilterProvider>();
+    final isFiltered = fp.isFiltered(message.content);
     final reactionCounts = <String, List<Reaction>>{};
     for (final reaction in message.reactions) {
       reactionCounts.putIfAbsent(reaction.emoji, () => []).add(reaction);
@@ -277,13 +281,40 @@ class MessageBubble extends StatelessWidget {
                     ),
                   if (message.contentType == 'text' ||
                       message.contentType.isEmpty)
-                    Text(message.content,
-                        style: TextStyle(fontSize: 15, color: textColor)),
+                    isFiltered
+                        ? Row(
+                            children: [
+                              Icon(Icons.filter_alt,
+                                  size: 14, color: Colors.grey[400]),
+                              const SizedBox(width: 4),
+                              Text('Filtered',
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.grey[400],
+                                      fontStyle: FontStyle.italic)),
+                            ],
+                          )
+                        : Text(message.content,
+                            style: TextStyle(
+                                fontSize: 15, color: textColor)),
                   if (message.contentType == 'formatted')
-                    MarkdownBody(
-                      data: message.content,
-                      styleSheet: MarkdownStyleSheet(
-                        p: TextStyle(fontSize: 15, color: textColor),
+                    isFiltered
+                        ? Row(
+                            children: [
+                              Icon(Icons.filter_alt,
+                                  size: 14, color: Colors.grey[400]),
+                              const SizedBox(width: 4),
+                              Text('Filtered',
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.grey[400],
+                                      fontStyle: FontStyle.italic)),
+                            ],
+                          )
+                        : MarkdownBody(
+                            data: message.content,
+                            styleSheet: MarkdownStyleSheet(
+                              p: TextStyle(fontSize: 15, color: textColor),
                         strong: const TextStyle(
                             fontSize: 15, fontWeight: FontWeight.bold),
                         code: const TextStyle(

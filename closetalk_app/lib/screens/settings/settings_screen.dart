@@ -15,6 +15,7 @@ import '../chat/join_group_screen.dart';
 import '../chat/broadcast_list_screen.dart';
 import '../chat/channel_discover_screen.dart';
 import '../chat/scheduled_messages_screen.dart';
+import 'message_filters_screen.dart';
 import '../admin/admin_dashboard_screen.dart';
 import '../auth/login_screen.dart';
 
@@ -169,6 +170,17 @@ class SettingsScreen extends StatelessWidget {
                   context,
                   MaterialPageRoute(
                       builder: (_) => const ScheduledMessagesScreen()),
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.filter_alt),
+                title: const Text('Message Filters'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const MessageFiltersScreen()),
                 ),
               ),
               const Divider(height: 1),
