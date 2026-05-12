@@ -59,3 +59,4 @@ go-installer.msl
 # ===== NPM cruft (if accidentally created) =====
 package-lock.json
 package.json
+*.apk
