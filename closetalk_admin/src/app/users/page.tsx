@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { listUsers, toggleUser, deleteUser, getUserDetail, getUser, logout } from "@/lib/api"
+import { listUsers, toggleUser, deleteUser, batchDeleteUsers, getUserDetail, getUser, logout } from "@/lib/api"
 import { useRouter } from "next/navigation"
 
 export default function UsersPage() {
@@ -11,6 +11,7 @@ export default function UsersPage() {
   const [query, setQuery] = useState("")
   const [loading, setLoading] = useState(true)
   const [detail, setDetail] = useState<any>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     const u = getUser()
@@ -20,10 +21,27 @@ export default function UsersPage() {
 
   function loadUsers(q?: string) {
     setLoading(true)
+    setSelected(new Set())
     listUsers(q).then(d => setUsers(d.users)).catch(() => {}).finally(() => setLoading(false))
   }
 
   useEffect(() => { if (user) loadUsers() }, [user])
+
+  function toggleSelect(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id) else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    if (selected.size === users.length) {
+      setSelected(new Set())
+    } else {
+      setSelected(new Set(users.map(u => u.id)))
+    }
+  }
 
   async function handleToggle(id: string) {
     try {
@@ -33,10 +51,21 @@ export default function UsersPage() {
   }
 
   async function handleDelete(id: string, name: string) {
-    if (!confirm(`Permanently delete user "${name}"? This cannot be undone.`)) return
+    if (!confirm(`Delete user "${name}"? This cannot be undone.`)) return
     try {
       await deleteUser(id)
       setUsers(prev => prev.filter(u => u.id !== id))
+      setSelected(prev => { const n = new Set(prev); n.delete(id); return n })
+    } catch {}
+  }
+
+  async function handleBatchDelete() {
+    if (selected.size === 0) return
+    if (!confirm(`Delete ${selected.size} selected users? This cannot be undone.`)) return
+    try {
+      await batchDeleteUsers(Array.from(selected))
+      setUsers(prev => prev.filter(u => !selected.has(u.id)))
+      setSelected(new Set())
     } catch {}
   }
 
@@ -68,7 +97,22 @@ export default function UsersPage() {
         <button onClick={logout} className="text-left px-3 py-2 text-sm text-stone-400 hover:text-white">Logout</button>
       </nav>
       <main className="flex-1 p-6 space-y-4">
-        <h1 className="text-2xl font-bold">Users</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Users</h1>
+          {selected.size > 0 && (
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-stone-500">{selected.size} selected</span>
+              <button onClick={handleBatchDelete}
+                className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700">
+                Delete Selected
+              </button>
+              <button onClick={() => setSelected(new Set())}
+                className="px-3 py-1.5 text-sm bg-stone-200 text-stone-700 rounded-lg hover:bg-stone-300">
+                Clear
+              </button>
+            </div>
+          )}
+        </div>
         <form onSubmit={handleSearch} className="flex gap-2">
           <input type="text" value={query} onChange={e => setQuery(e.target.value)}
             placeholder="Search by name, email, or username..."
@@ -84,6 +128,12 @@ export default function UsersPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-stone-50 text-left text-stone-600">
+                  <th className="px-4 py-3 w-10">
+                    <input type="checkbox"
+                      checked={users.length > 0 && selected.size === users.length}
+                      onChange={toggleSelectAll}
+                      className="accent-stone-800" />
+                  </th>
                   <th className="px-4 py-3 font-medium">Name</th>
                   <th className="px-4 py-3 font-medium">Email</th>
                   <th className="px-4 py-3 font-medium">Username</th>
@@ -95,7 +145,14 @@ export default function UsersPage() {
               </thead>
               <tbody>
                 {users.map(u => (
-                  <tr key={u.id} className="border-t hover:bg-stone-50 cursor-pointer" onClick={() => handleShowDetail(u.id)}>
+                  <tr key={u.id} className={`border-t hover:bg-stone-50 cursor-pointer ${selected.has(u.id) ? "bg-stone-100" : ""}`}
+                    onClick={() => handleShowDetail(u.id)}>
+                    <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                      <input type="checkbox"
+                        checked={selected.has(u.id)}
+                        onChange={() => toggleSelect(u.id)}
+                        className="accent-stone-800" />
+                    </td>
                     <td className="px-4 py-3">{u.display_name}</td>
                     <td className="px-4 py-3 text-stone-500">{u.email}</td>
                     <td className="px-4 py-3 text-stone-500">@{u.username}</td>

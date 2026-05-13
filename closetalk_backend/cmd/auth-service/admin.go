@@ -66,14 +66,7 @@ func handleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 	targetUserID := chi.URLParam(r, "userId")
 	ctx := context.Background()
 
-	var exists bool
-	database.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL)`, targetUserID).Scan(&exists)
-	if !exists {
-		writeError(w, http.StatusNotFound, &model.AppError{Code: "NOT_FOUND", Message: "user not found"})
-		return
-	}
-
-	_, err := database.Pool.Exec(ctx, `UPDATE users SET deleted_at = now(), is_active = false WHERE id = $1`, targetUserID)
+	_, err := database.Pool.Exec(ctx, `UPDATE users SET deleted_at = now(), is_active = false WHERE id = $1 AND deleted_at IS NULL`, targetUserID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to delete user"})
 		return
@@ -81,6 +74,24 @@ func handleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 	database.Valkey.Del(ctx, "user_sessions:"+targetUserID)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func handleAdminBatchDeleteUsers(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserIDs []string `json:"user_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.UserIDs) == 0 {
+		writeError(w, http.StatusBadRequest, &model.AppError{Code: "VALIDATION", Message: "user_ids array required"})
+		return
+	}
+
+	ctx := context.Background()
+	for _, uid := range req.UserIDs {
+		database.Pool.Exec(ctx, `UPDATE users SET deleted_at = now(), is_active = false WHERE id = $1 AND deleted_at IS NULL`, uid)
+		database.Valkey.Del(ctx, "user_sessions:"+uid)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": len(req.UserIDs)})
 }
 
 func handleAdminGetUser(w http.ResponseWriter, r *http.Request) {

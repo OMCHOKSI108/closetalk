@@ -130,6 +130,15 @@ export async function listReports() {
   return res.json()
 }
 
+export async function batchDeleteUsers(userIds: string[]) {
+  const res = await fetchAPI("/admin/users/batch-delete", {
+    method: "POST",
+    body: JSON.stringify({ user_ids: userIds }),
+  })
+  if (!res.ok) throw new Error("failed to batch delete users")
+  return res.json()
+}
+
 export async function reviewReport(messageId: string, action: string) {
   const res = await fetchAPI(`/moderation/${messageId}/review`, {
     method: "POST",

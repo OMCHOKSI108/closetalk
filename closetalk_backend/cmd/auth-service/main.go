@@ -361,6 +361,7 @@ func main() {
 		r.Get("/admin/users/{userId}", handleAdminGetUser)
 		r.Put("/admin/users/{userId}/disable", handleAdminDisableUser)
 		r.Delete("/admin/users/{userId}", handleAdminDeleteUser)
+		r.Post("/admin/users/batch-delete", handleAdminBatchDeleteUsers)
 		r.Get("/admin/analytics", handleAdminGetAnalytics)
 		r.Get("/admin/flags", handleAdminListFlags)
 		r.Put("/admin/flags/{id}", handleAdminUpdateFlag)
