@@ -62,6 +62,67 @@ func handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"users": users})
 }
 
+func handleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
+	targetUserID := chi.URLParam(r, "userId")
+	ctx := context.Background()
+
+	var exists bool
+	database.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL)`, targetUserID).Scan(&exists)
+	if !exists {
+		writeError(w, http.StatusNotFound, &model.AppError{Code: "NOT_FOUND", Message: "user not found"})
+		return
+	}
+
+	_, err := database.Pool.Exec(ctx, `UPDATE users SET deleted_at = now(), is_active = false WHERE id = $1`, targetUserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to delete user"})
+		return
+	}
+	database.Valkey.Del(ctx, "user_sessions:"+targetUserID)
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func handleAdminGetUser(w http.ResponseWriter, r *http.Request) {
+	targetUserID := chi.URLParam(r, "userId")
+	ctx := context.Background()
+
+	var deviceCount, groupCount, convCount int
+	database.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM user_devices WHERE user_id = $1`, targetUserID).Scan(&deviceCount)
+	database.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM group_members WHERE user_id = $1 AND left_at IS NULL`, targetUserID).Scan(&groupCount)
+	database.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM conversation_participants WHERE user_id = $1`, targetUserID).Scan(&convCount)
+
+	type userDetail struct {
+		ID                string `json:"id"`
+		Email             string `json:"email"`
+		DisplayName       string `json:"display_name"`
+		Username          string `json:"username"`
+		IsActive          bool   `json:"is_active"`
+		IsAdmin           bool   `json:"is_admin"`
+		CreatedAt         string `json:"created_at"`
+		LastSeen          string `json:"last_seen"`
+		DeviceCount       int    `json:"device_count"`
+		GroupCount        int    `json:"group_count"`
+		ConversationCount int    `json:"conversation_count"`
+	}
+
+	var u userDetail
+	err := database.Pool.QueryRow(ctx,
+		`SELECT id, COALESCE(email,''), display_name, COALESCE(username,''),
+		        is_active, is_admin, COALESCE(created_at::text,''), COALESCE(last_seen::text,'')
+		 FROM users WHERE id = $1 AND deleted_at IS NULL`, targetUserID,
+	).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Username, &u.IsActive, &u.IsAdmin, &u.CreatedAt, &u.LastSeen)
+	if err != nil {
+		writeError(w, http.StatusNotFound, &model.AppError{Code: "NOT_FOUND", Message: "user not found"})
+		return
+	}
+	u.DeviceCount = deviceCount
+	u.GroupCount = groupCount
+	u.ConversationCount = convCount
+
+	writeJSON(w, http.StatusOK, u)
+}
+
 func handleAdminDisableUser(w http.ResponseWriter, r *http.Request) {
 	targetUserID := chi.URLParam(r, "userId")
 

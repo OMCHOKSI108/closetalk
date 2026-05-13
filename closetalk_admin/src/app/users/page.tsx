@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { listUsers, toggleUser, getUser, logout } from "@/lib/api"
+import { listUsers, toggleUser, deleteUser, getUserDetail, getUser, logout } from "@/lib/api"
 import { useRouter } from "next/navigation"
 
 export default function UsersPage() {
@@ -10,6 +10,7 @@ export default function UsersPage() {
   const [users, setUsers] = useState<any[]>([])
   const [query, setQuery] = useState("")
   const [loading, setLoading] = useState(true)
+  const [detail, setDetail] = useState<any>(null)
 
   useEffect(() => {
     const u = getUser()
@@ -31,6 +32,21 @@ export default function UsersPage() {
     } catch {}
   }
 
+  async function handleDelete(id: string, name: string) {
+    if (!confirm(`Permanently delete user "${name}"? This cannot be undone.`)) return
+    try {
+      await deleteUser(id)
+      setUsers(prev => prev.filter(u => u.id !== id))
+    } catch {}
+  }
+
+  async function handleShowDetail(id: string) {
+    try {
+      const d = await getUserDetail(id)
+      setDetail(d)
+    } catch {}
+  }
+
   function handleSearch(e: React.FormEvent) {
     e.preventDefault()
     loadUsers(query || undefined)
@@ -44,6 +60,8 @@ export default function UsersPage() {
         <div className="text-white font-bold text-lg mb-4">CloseTalk</div>
         <a href="/dashboard" className="block px-3 py-2 rounded hover:bg-stone-800 text-sm">Dashboard</a>
         <a href="/users" className="block px-3 py-2 rounded bg-stone-700 text-white text-sm">Users</a>
+        <a href="/reports" className="block px-3 py-2 rounded hover:bg-stone-800 text-sm">Reports</a>
+        <a href="/flags" className="block px-3 py-2 rounded hover:bg-stone-800 text-sm">Feature Flags</a>
         <a href="/audit" className="block px-3 py-2 rounded hover:bg-stone-800 text-sm">Audit Log</a>
         <div className="flex-1" />
         <div className="text-xs text-stone-500 px-3">{user.display_name || user.email}</div>
@@ -77,7 +95,7 @@ export default function UsersPage() {
               </thead>
               <tbody>
                 {users.map(u => (
-                  <tr key={u.id} className="border-t hover:bg-stone-50">
+                  <tr key={u.id} className="border-t hover:bg-stone-50 cursor-pointer" onClick={() => handleShowDetail(u.id)}>
                     <td className="px-4 py-3">{u.display_name}</td>
                     <td className="px-4 py-3 text-stone-500">{u.email}</td>
                     <td className="px-4 py-3 text-stone-500">@{u.username}</td>
@@ -88,16 +106,42 @@ export default function UsersPage() {
                     </td>
                     <td className="px-4 py-3">{u.is_admin ? "Yes" : "No"}</td>
                     <td className="px-4 py-3 text-stone-500">{new Date(u.created_at).toLocaleDateString()}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 space-x-1" onClick={e => e.stopPropagation()}>
                       <button onClick={() => handleToggle(u.id)}
                         className="text-xs px-3 py-1 rounded bg-stone-200 hover:bg-stone-300">
                         {u.is_active ? "Disable" : "Enable"}
+                      </button>
+                      <button onClick={() => handleDelete(u.id, u.display_name || u.email)}
+                        className="text-xs px-3 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200">
+                        Delete
                       </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {detail && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setDetail(null)}>
+            <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-xl" onClick={e => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-bold">{detail.display_name}</h2>
+                <button onClick={() => setDetail(null)} className="text-stone-400 hover:text-stone-600 text-xl">&times;</button>
+              </div>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-stone-500">Email</span><span>{detail.email}</span></div>
+                <div className="flex justify-between"><span className="text-stone-500">Username</span><span>@{detail.username || "(none)"}</span></div>
+                <div className="flex justify-between"><span className="text-stone-500">Status</span><span className={detail.is_active ? "text-green-600" : "text-red-600"}>{detail.is_active ? "Active" : "Disabled"}</span></div>
+                <div className="flex justify-between"><span className="text-stone-500">Admin</span><span>{detail.is_admin ? "Yes" : "No"}</span></div>
+                <div className="flex justify-between"><span className="text-stone-500">Devices</span><span>{detail.device_count}</span></div>
+                <div className="flex justify-between"><span className="text-stone-500">Groups</span><span>{detail.group_count}</span></div>
+                <div className="flex justify-between"><span className="text-stone-500">Conversations</span><span>{detail.conversation_count}</span></div>
+                <div className="flex justify-between"><span className="text-stone-500">Last Seen</span><span>{detail.last_seen ? new Date(detail.last_seen).toLocaleString() : "Never"}</span></div>
+                <div className="flex justify-between"><span className="text-stone-500">Created</span><span>{detail.created_at ? new Date(detail.created_at).toLocaleString() : "Unknown"}</span></div>
+              </div>
+            </div>
           </div>
         )}
       </main>

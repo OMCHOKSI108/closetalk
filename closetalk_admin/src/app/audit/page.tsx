@@ -25,6 +25,8 @@ export default function AuditPage() {
         <div className="text-white font-bold text-lg mb-4">CloseTalk</div>
         <a href="/dashboard" className="block px-3 py-2 rounded hover:bg-stone-800 text-sm">Dashboard</a>
         <a href="/users" className="block px-3 py-2 rounded hover:bg-stone-800 text-sm">Users</a>
+        <a href="/reports" className="block px-3 py-2 rounded hover:bg-stone-800 text-sm">Reports</a>
+        <a href="/flags" className="block px-3 py-2 rounded hover:bg-stone-800 text-sm">Feature Flags</a>
         <a href="/audit" className="block px-3 py-2 rounded bg-stone-700 text-white text-sm">Audit Log</a>
         <div className="flex-1" />
         <div className="text-xs text-stone-500 px-3">{user.display_name || user.email}</div>

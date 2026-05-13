@@ -111,3 +111,30 @@ export async function getAuditLog() {
   if (!res.ok) throw new Error("failed to get audit log")
   return res.json()
 }
+
+export async function deleteUser(userId: string) {
+  const res = await fetchAPI(`/admin/users/${userId}`, { method: "DELETE" })
+  if (!res.ok) throw new Error("failed to delete user")
+  return res.json()
+}
+
+export async function getUserDetail(userId: string) {
+  const res = await fetchAPI(`/admin/users/${userId}`)
+  if (!res.ok) throw new Error("failed to get user detail")
+  return res.json()
+}
+
+export async function listReports() {
+  const res = await fetchAPI("/moderation/queue")
+  if (!res.ok) return { items: [] }
+  return res.json()
+}
+
+export async function reviewReport(messageId: string, action: string) {
+  const res = await fetchAPI(`/moderation/${messageId}/review`, {
+    method: "POST",
+    body: JSON.stringify({ action }),
+  })
+  if (!res.ok) throw new Error("failed to review report")
+  return res.json()
+}
