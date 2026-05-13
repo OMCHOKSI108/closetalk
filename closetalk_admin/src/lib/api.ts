@@ -53,13 +53,22 @@ export function getUser() {
 }
 
 export async function getHealth() {
+  // Auth service serves /health. Message service has its own /health but via
+  // CloudFront's path-based routing, /health always lands on auth-service.
+  // For local dev (separate ports) the override env var can split them.
+  const authBase = API()
+  const msgBase = process.env.NEXT_PUBLIC_MSG_API_URL || API()
   const [authRes, msgRes] = await Promise.allSettled([
-    fetch(`${API()}/health`),
-    fetch(`${API().replace("8081", "8082")}/health`),
+    fetch(`${authBase}/health`),
+    fetch(`${msgBase}/health`),
   ])
   return {
-    auth: authRes.status === "fulfilled" && authRes.value.ok ? await authRes.value.json() : { status: "unreachable", service: "auth-service" },
-    message: msgRes.status === "fulfilled" && msgRes.value.ok ? await msgRes.value.json() : { status: "unreachable", service: "message-service" },
+    auth: authRes.status === "fulfilled" && authRes.value.ok
+      ? await authRes.value.json()
+      : { status: "unreachable", service: "auth-service" },
+    message: msgRes.status === "fulfilled" && msgRes.value.ok
+      ? await msgRes.value.json()
+      : { status: "unreachable", service: "message-service" },
   }
 }
 
