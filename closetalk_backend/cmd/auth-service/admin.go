@@ -26,42 +26,34 @@ func handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var users []adminUser
-	var err error
+
+	querySQL := `SELECT id, COALESCE(email,''), display_name, COALESCE(username,''), is_active, is_admin, COALESCE(created_at::text,'')
+				 FROM users WHERE deleted_at IS NULL`
+	args := []any{}
 
 	if query != "" {
-		rows, qErr := database.Pool.Query(ctx,
-			`SELECT id, COALESCE(email,''), display_name, username, is_active, is_admin, created_at
-			 FROM users WHERE deleted_at IS NULL AND (username ILIKE $1 OR display_name ILIKE $1 OR COALESCE(email,'') ILIKE $1)
-			 ORDER BY created_at DESC LIMIT 50`,
-			"%"+query+"%",
-		)
-		if qErr != nil {
-			writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "search failed"})
-			return
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var u adminUser
-			rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Username, &u.IsActive, &u.IsAdmin, &u.CreatedAt)
-			users = append(users, u)
-		}
-	} else {
-		rows, qErr := database.Pool.Query(ctx,
-			`SELECT id, COALESCE(email,''), display_name, username, is_active, is_admin, created_at
-			 FROM users WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 50`,
-		)
-		if qErr != nil {
-			writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "list failed"})
-			return
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var u adminUser
-			rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Username, &u.IsActive, &u.IsAdmin, &u.CreatedAt)
-			users = append(users, u)
-		}
+		querySQL += ` AND (username ILIKE $1 OR display_name ILIKE $1 OR COALESCE(email,'') ILIKE $1)`
+		args = append(args, "%"+query+"%")
 	}
-	_ = err
+	querySQL += ` ORDER BY created_at DESC LIMIT 50`
+
+	rows, qErr := database.Pool.Query(ctx, querySQL, args...)
+	if qErr != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "query failed"})
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var u adminUser
+		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Username, &u.IsActive, &u.IsAdmin, &u.CreatedAt); err != nil {
+			continue
+		}
+		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		users = []adminUser{}
+	}
 
 	if users == nil {
 		users = []adminUser{}
