@@ -605,6 +605,30 @@ resource "aws_iam_role_policy" "ecs_task_s3_media" {
   })
 }
 
+resource "aws_iam_role_policy" "ecs_task_infrastructure" {
+  name = "${var.app_name}-ecs-task-infrastructure-${var.environment}"
+  role = aws_iam_role.ecs_task.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "ecs:DescribeServices",
+        "ecs:UpdateService",
+        "rds:DescribeDBInstances",
+        "rds:StopDBInstance",
+        "rds:StartDBInstance",
+        "cloudwatch:GetMetricStatistics",
+        "cloudwatch:GetMetricData",
+        "ce:GetCostAndUsage",
+        "ce:GetCostForecast",
+      ]
+      Resource = "*"
+    }]
+  })
+}
+
 # ─── ECS ───────────────────────────────────────────────────────────────────────
 
 resource "aws_ecs_cluster" "closetalk" {

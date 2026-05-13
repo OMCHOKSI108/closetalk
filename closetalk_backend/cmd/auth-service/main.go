@@ -366,6 +366,13 @@ func main() {
 		r.Get("/admin/flags", handleAdminListFlags)
 		r.Put("/admin/flags/{id}", handleAdminUpdateFlag)
 		r.Get("/admin/audit-log", handleAdminAuditLog)
+		r.Get("/admin/infrastructure", handleInfrastructureStatus)
+		r.Get("/admin/infrastructure/metrics", handleInfrastructureMetrics)
+		r.Get("/admin/infrastructure/costs", handleInfrastructureCosts)
+		r.Post("/admin/infrastructure/stop", handleInfrastructureStopInit)
+		r.Post("/admin/infrastructure/stop/confirm", handleInfrastructureStopConfirm)
+		r.Post("/admin/infrastructure/start", handleInfrastructureStartInit)
+		r.Post("/admin/infrastructure/start/confirm", handleInfrastructureStartConfirm)
 	})
 
 	// Webhooks (JWT required)

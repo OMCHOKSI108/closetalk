@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/admin_provider.dart';
+import '../../providers/infrastructure_provider.dart';
 import '../../screens/settings/moderation_screen.dart';
 import 'admin_users_screen.dart';
 import 'admin_flags_screen.dart';
 import 'admin_audit_screen.dart';
+import 'infrastructure_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -97,6 +99,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     context,
                     MaterialPageRoute(
                         builder: (_) => const AdminAuditScreen()),
+                  ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.cloud, color: Colors.blue),
+                  title: const Text('AWS Infrastructure'),
+                  subtitle: const Text('Metrics, costs, stop/start'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ChangeNotifierProvider(
+                        create: (_) => InfrastructureProvider(),
+                        child: const InfrastructureScreen(),
+                      ),
+                    ),
                   ),
                 ),
                 const Divider(height: 1),
