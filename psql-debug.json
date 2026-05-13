@@ -1,0 +1,35 @@
+{
+  "family": "closetalk-psql-runner",
+  "taskRoleArn": "arn:aws:iam::706489758484:role/closetalk-ecs-execution-production",
+  "executionRoleArn": "arn:aws:iam::706489758484:role/closetalk-ecs-execution-production",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "containerDefinitions": [
+    {
+      "name": "psql-runner",
+      "image": "public.ecr.aws/docker/library/postgres:17-alpine",
+      "environment": [
+        {"name": "PGPASSWORD", "value": "zu6ExkDKGI9FExOKzNLIl9ylZstOf0le"},
+        {"name": "PGSSLMODE", "value": "require"}
+      ],
+      "command": [
+        "psql",
+        "-h", "closetalk-production.cfc280soakcw.ap-south-1.rds.amazonaws.com",
+        "-U", "closetalk",
+        "-d", "closetalk",
+        "-A",
+        "-c", "SELECT id::text, email, COALESCE(username,'<null>') as username, created_at::text FROM users WHERE deleted_at IS NULL ORDER BY created_at DESC"
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/closetalk/auth-service",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "psql-debug"
+        }
+      }
+    }
+  ]
+}
