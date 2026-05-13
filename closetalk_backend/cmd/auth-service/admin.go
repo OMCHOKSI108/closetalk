@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OMCHOKSI108/closetalk/internal/auth"
 	"github.com/OMCHOKSI108/closetalk/internal/database"
 	"github.com/OMCHOKSI108/closetalk/internal/model"
 	"github.com/go-chi/chi/v5"
