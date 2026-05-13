@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM golang:1.26-alpine AS builder
 
-RUN apk add --no-cache git ca-certificates
+RUN apk add --no-cache git ca-certificates gcc musl-dev
 
 WORKDIR /build
 
@@ -12,7 +12,7 @@ COPY . .
 
 ARG SERVICE=auth-service
 ARG PORT=8081
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+RUN GOOS=linux GOARCH=amd64 \
     go build -ldflags="-s -w" -o /app ./cmd/$SERVICE
 
 FROM alpine:3.21
