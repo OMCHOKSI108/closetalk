@@ -58,7 +58,13 @@ vendor/
 # ===== Installer artifacts =====
 go-installer.msl
 
-# ===== NPM cruft (if accidentally created) =====
-package-lock.json
-package.json
+# ===== NPM cruft (if accidentally created in root) =====
+/package-lock.json
+/package.json
 *.apk
+
+# ===== NPM packages for admin & frontend =====
+!closetalk_admin/package.json
+!closetalk_admin/package-lock.json
+!closetalk_frontend/package.json
+!closetalk_frontend/package-lock.json
