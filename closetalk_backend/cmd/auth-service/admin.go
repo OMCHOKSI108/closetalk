@@ -138,11 +138,38 @@ func handleAdminDisableUser(w http.ResponseWriter, r *http.Request) {
 func handleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 	targetUserID := chi.URLParam(r, "userId")
 	ctx := context.Background()
-	_, err := database.Pool.Exec(ctx, `UPDATE users SET deleted_at = now(), is_active = false WHERE id = $1 AND deleted_at IS NULL`, targetUserID)
+
+	tx, err := database.Pool.Begin(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to delete user"})
 		return
 	}
+	defer tx.Rollback(ctx)
+
+	// Delete related data first
+	tx.Exec(ctx, `DELETE FROM user_devices WHERE user_id = $1`, targetUserID)
+	tx.Exec(ctx, `DELETE FROM user_settings WHERE user_id = $1`, targetUserID)
+	tx.Exec(ctx, `DELETE FROM notification_tokens WHERE user_id = $1`, targetUserID)
+	tx.Exec(ctx, `DELETE FROM conversation_participants WHERE user_id = $1`, targetUserID)
+	tx.Exec(ctx, `DELETE FROM group_members WHERE user_id = $1`, targetUserID)
+	tx.Exec(ctx, `DELETE FROM contacts WHERE user_id = $1 OR contact_user_id = $1`, targetUserID)
+	tx.Exec(ctx, `DELETE FROM contact_requests WHERE sender_id = $1 OR recipient_id = $1`, targetUserID)
+	tx.Exec(ctx, `DELETE FROM reports WHERE reporter_id = $1 OR reported_user_id = $1`, targetUserID)
+	tx.Exec(ctx, `DELETE FROM audit_log WHERE admin_id = $1 OR target_id = $1`, targetUserID)
+	tx.Exec(ctx, `DELETE FROM webhooks WHERE user_id = $1`, targetUserID)
+
+	// Hard delete the user
+	_, err = tx.Exec(ctx, `DELETE FROM users WHERE id = $1`, targetUserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to delete user"})
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, &model.AppError{Code: "DB_ERROR", Message: "failed to delete user"})
+		return
+	}
+
 	database.Valkey.Del(ctx, "user_sessions:"+targetUserID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

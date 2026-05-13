@@ -1,6 +1,7 @@
 package media
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -124,6 +125,23 @@ func GenerateUploadURLWithFolder(ctx context.Context, folder, fileName, contentT
 
 	mediaURL := publicURL + "/" + objectKey
 	return req.URL, mediaURL, nil
+}
+
+func PutObject(ctx context.Context, objectKey string, data []byte, contentType string) (string, error) {
+	if !enabled {
+		return "", fmt.Errorf("media pipeline not configured")
+	}
+	_, err := client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(bucket),
+		Key:         aws.String(objectKey),
+		Body:        bytes.NewReader(data),
+		ContentType: aws.String(contentType),
+	})
+	if err != nil {
+		return "", fmt.Errorf("s3 put object: %w", err)
+	}
+	mediaURL := publicURL + "/" + objectKey
+	return mediaURL, nil
 }
 
 func DeleteObject(ctx context.Context, objectKey string) error {

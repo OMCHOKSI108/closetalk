@@ -1,5 +1,6 @@
 class Group {
   final String id;
+  final String? conversationId;
   final String name;
   final String description;
   final String avatarUrl;
@@ -20,6 +21,7 @@ class Group {
 
   Group({
     required this.id,
+    this.conversationId,
     required this.name,
     this.description = '',
     this.avatarUrl = '',
@@ -42,6 +44,7 @@ class Group {
   factory Group.fromJson(Map<String, dynamic> json) {
     return Group(
       id: json['id'] as String,
+      conversationId: json['conversation_id'] as String?,
       name: json['name'] as String,
       description: json['description'] as String? ?? '',
       avatarUrl: json['avatar_url'] as String? ?? '',
@@ -72,6 +75,7 @@ class Group {
 
   Map<String, dynamic> toJson() => {
         'id': id,
+        if (conversationId != null) 'conversation_id': conversationId,
         'name': name,
         'description': description,
         'avatar_url': avatarUrl,
@@ -155,6 +159,7 @@ class PinnedMessage {
 
 class GroupListItem {
   final String id;
+  final String? conversationId;
   final String name;
   final String description;
   final String avatarUrl;
@@ -168,6 +173,7 @@ class GroupListItem {
 
   GroupListItem({
     required this.id,
+    this.conversationId,
     required this.name,
     this.description = '',
     this.avatarUrl = '',
@@ -183,6 +189,7 @@ class GroupListItem {
   factory GroupListItem.fromJson(Map<String, dynamic> json) {
     return GroupListItem(
       id: json['id'] as String,
+      conversationId: json['conversation_id'] as String?,
       name: json['name'] as String,
       description: json['description'] as String? ?? '',
       avatarUrl: json['avatar_url'] as String? ?? '',

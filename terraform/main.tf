@@ -12,6 +12,8 @@ provider "aws" {
   region = var.aws_region
 }
 
+data "aws_caller_identity" "current" {}
+
 # ─── VPC ──────────────────────────────────────────────────────────────────────
 
 resource "aws_vpc" "closetalk" {
@@ -359,6 +361,64 @@ resource "aws_elasticache_replication_group" "closetalk" {
   tags = { Name = "${var.app_name}-valkey" }
 }
 
+# ─── S3 Media Bucket ───────────────────────────────────────────────────────────
+
+resource "aws_s3_bucket" "media" {
+  bucket        = var.s3_media_bucket_name
+  force_destroy = true
+
+  tags = { Name = "${var.app_name}-media" }
+}
+
+resource "aws_s3_bucket_public_access_block" "media" {
+  bucket                  = aws_s3_bucket.media.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "media" {
+  bucket = aws_s3_bucket.media.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_cloudfront_origin_access_control" "s3" {
+  name                              = "${var.app_name}-s3-oac-${var.environment}"
+  description                       = "OAC for ${var.app_name} S3 media bucket"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+data "aws_iam_policy_document" "s3_media_cloudfront" {
+  statement {
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.media.arn}/*"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudfront.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceArn"
+      values   = [aws_cloudfront_distribution.closetalk.arn]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "media_cloudfront" {
+  bucket = aws_s3_bucket.media.id
+  policy = data.aws_iam_policy_document.s3_media_cloudfront.json
+}
+
 # ─── ALB ──────────────────────────────────────────────────────────────────────
 
 resource "aws_lb" "closetalk" {
@@ -527,6 +587,24 @@ resource "aws_iam_role_policy" "ecs_task_dynamodb" {
   })
 }
 
+resource "aws_iam_role_policy" "ecs_task_s3_media" {
+  name = "${var.app_name}-ecs-task-s3-media-${var.environment}"
+  role = aws_iam_role.ecs_task.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject",
+      ]
+      Resource = "${aws_s3_bucket.media.arn}/*"
+    }]
+  })
+}
+
 # ─── ECS ───────────────────────────────────────────────────────────────────────
 
 resource "aws_ecs_cluster" "closetalk" {
@@ -586,6 +664,8 @@ resource "aws_ecs_task_definition" "auth_service" {
       { name = "JWT_SECRET",        value = var.jwt_secret },
       { name = "SES_FROM_EMAIL",    value = "noreply@closetalk.app" },
       { name = "AWS_REGION",        value = var.aws_region },
+      { name = "S3_BUCKET",         value = aws_s3_bucket.media.id },
+      { name = "S3_PUBLIC_URL",     value = "https://${aws_cloudfront_distribution.closetalk.domain_name}" },
     ]
 
     logConfiguration = {
@@ -629,6 +709,8 @@ resource "aws_ecs_task_definition" "message_service" {
       { name = "VALKEY_ADDR",          value = "${aws_elasticache_replication_group.closetalk.primary_endpoint_address}:6379" },
       { name = "JWT_SECRET",           value = var.jwt_secret },
       { name = "AWS_REGION",           value = var.aws_region },
+      { name = "S3_BUCKET",            value = aws_s3_bucket.media.id },
+      { name = "S3_PUBLIC_URL",        value = "https://${aws_cloudfront_distribution.closetalk.domain_name}" },
     ]
 
     logConfiguration = {
@@ -774,6 +856,12 @@ resource "aws_cloudfront_distribution" "closetalk" {
     }
   }
 
+  origin {
+    domain_name              = aws_s3_bucket.media.bucket_domain_name
+    origin_id                = "closetalk-s3"
+    origin_access_control_id = aws_cloudfront_origin_access_control.s3.id
+  }
+
   enabled         = true
   is_ipv6_enabled = true
   price_class     = "PriceClass_100"  # use only North America/Europe/Asia edges
@@ -796,6 +884,26 @@ resource "aws_cloudfront_distribution" "closetalk" {
     min_ttl                = 0
     default_ttl            = 0
     max_ttl                = 0
+    compress               = true
+  }
+
+  ordered_cache_behavior {
+    path_pattern     = "/media/*"
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "closetalk-s3"
+
+    forwarded_values {
+      query_string = false
+      cookies {
+        forward = "none"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 86400
+    default_ttl            = 86400
+    max_ttl                = 31536000
     compress               = true
   }
 

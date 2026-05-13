@@ -52,3 +52,13 @@ output "app_url" {
   description = "Public HTTPS URL for the API"
   value       = "https://${aws_cloudfront_distribution.closetalk.domain_name}/"
 }
+
+output "s3_media_bucket_name" {
+  description = "S3 media bucket name"
+  value       = aws_s3_bucket.media.id
+}
+
+output "cloudfront_oac_id" {
+  description = "CloudFront Origin Access Control ID for S3"
+  value       = aws_cloudfront_origin_access_control.s3.id
+}

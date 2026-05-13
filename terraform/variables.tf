@@ -27,3 +27,9 @@ variable "db_password" {
   type        = string
   sensitive   = true
 }
+
+variable "s3_media_bucket_name" {
+  description = "Name of the S3 bucket for media uploads"
+  type        = string
+  default     = "closetalk-media-706489758484"
+}

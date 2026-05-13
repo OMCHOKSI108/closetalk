@@ -473,18 +473,37 @@ func handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	hub.broadcastToChat(req.ChatID, wsPayload, userID)
+
+	// Resolve recipient IDs: use provided IDs, or look up conversation participants
+	recipientIDs := req.RecipientIDs
+	if len(recipientIDs) == 0 && database.Pool != nil {
+		rows, err := database.Pool.Query(context.Background(),
+			`SELECT user_id FROM conversation_participants WHERE conversation_id = $1::uuid AND user_id != $2`,
+			req.ChatID, userID,
+		)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var uid string
+				if err := rows.Scan(&uid); err == nil {
+					recipientIDs = append(recipientIDs, uid)
+				}
+			}
+		}
+	}
+
 	// Multi-device fan-out: push to all recipient devices
-	for _, recipientID := range req.RecipientIDs {
+	for _, recipientID := range recipientIDs {
 		hub.broadcastToUserDevices(recipientID, wsPayload, "")
 	}
 
 	// Send push notifications to recipients not currently connected
-	go sendPushNotifications(context.Background(), req.RecipientIDs, usernames[userID], req.Content, msg.ChatID, msg.ID.String(), msg.SenderID)
+	go sendPushNotifications(context.Background(), recipientIDs, usernames[userID], req.Content, msg.ChatID, msg.ID.String(), msg.SenderID)
 
 	// Dispatch webhooks for all recipients
 	go func() {
 		ctx := context.Background()
-		for _, recipientID := range req.RecipientIDs {
+		for _, recipientID := range recipientIDs {
 			hooks, err := webhooks.LoadActiveWebhooks(ctx, recipientID)
 			if err != nil || len(hooks) == 0 {
 				continue
@@ -1141,10 +1160,6 @@ func handleUploadVoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workDir, _ := os.Getwd()
-	voiceDir := filepath.Join(workDir, "uploads", "voice")
-	os.MkdirAll(voiceDir, 0755)
-
 	ext := filepath.Ext(header.Filename)
 	if ext == "" {
 		switch contentType {
@@ -1164,14 +1179,30 @@ func handleUploadVoice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filename := uuid.New().String() + ext
-	filePath := filepath.Join(voiceDir, filename)
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
-		writeError(w, http.StatusInternalServerError, "INTERNAL", "failed to save file")
-		return
+
+	var mediaURL string
+	if media.IsEnabled() {
+		objectKey := "voice/" + filename
+		url, err := media.PutObject(context.Background(), objectKey, data, contentType)
+		if err == nil {
+			mediaURL = url
+		}
+	}
+
+	if mediaURL == "" {
+		workDir, _ := os.Getwd()
+		voiceDir := filepath.Join(workDir, "uploads", "voice")
+		os.MkdirAll(voiceDir, 0755)
+		filePath := filepath.Join(voiceDir, filename)
+		if err := os.WriteFile(filePath, data, 0644); err != nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL", "failed to save file")
+			return
+		}
+		mediaURL = "/voice/" + filename
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{
-		"media_url": "/voice/" + filename,
+		"media_url": mediaURL,
 		"duration":  duration,
 	})
 }

@@ -51,29 +51,33 @@ class WebRTCService {
     }
   }
 
-  Future<MediaStream> startLocalVideo() async {
+  Future<MediaStream?> startLocalVideo() async {
     final mediaConstraints = <String, dynamic>{
       'audio': true,
       'video': true,
     };
     _localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-    _localRenderer.srcObject = _localStream;
-    for (final track in _localStream!.getTracks()) {
-      await _pc?.addTrack(track, _localStream!);
+    if (_localStream == null) return null;
+    final stream = _localStream!;
+    _localRenderer.srcObject = stream;
+    for (final track in stream.getTracks()) {
+      await _pc?.addTrack(track, stream);
     }
-    return _localStream!;
+    return stream;
   }
 
-  Future<MediaStream> startLocalAudio() async {
+  Future<MediaStream?> startLocalAudio() async {
     final mediaConstraints = <String, dynamic>{
       'audio': true,
       'video': false,
     };
     _localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-    for (final track in _localStream!.getTracks()) {
-      await _pc?.addTrack(track, _localStream!);
+    if (_localStream == null) return null;
+    final stream = _localStream!;
+    for (final track in stream.getTracks()) {
+      await _pc?.addTrack(track, stream);
     }
-    return _localStream!;
+    return stream;
   }
 
   Future<Map<String, dynamic>> createOffer() async {

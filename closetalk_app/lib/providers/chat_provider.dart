@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import '../models/message.dart';
 import '../services/api_config.dart';
 import '../services/local_storage_service.dart';
@@ -143,11 +144,12 @@ class ChatProvider extends ChangeNotifier {
     final tempId = 'local_${DateTime.now().microsecondsSinceEpoch}';
     String finalContent = content;
     String finalContentType = contentType;
+    final isMediaType = contentType == 'voice' || contentType == 'image' || contentType == 'location' || contentType == 'poll';
     if (_e2ee != null && _e2ee!.enabled && _e2ee!.hasSessionKey(chatId)) {
       final encrypted = await _e2ee!.encrypt(plaintext: content, chatId: chatId);
       if (encrypted != null) {
         finalContent = encrypted;
-        finalContentType = 'e2ee';
+        if (!isMediaType) finalContentType = 'e2ee';
       }
     }
 
@@ -245,8 +247,11 @@ class ChatProvider extends ChangeNotifier {
       );
       request.headers['Authorization'] =
           'Bearer ${ApiConfig.token ?? ''}';
-      request.files
-          .add(await http.MultipartFile.fromPath('voice', filePath));
+      request.files.add(await http.MultipartFile.fromPath(
+        'voice',
+        filePath,
+        contentType: MediaType('audio', 'mp4'),
+      ));
       request.fields['duration'] = durationSec.toStringAsFixed(1);
 
       final streamed = await request.send();

@@ -102,6 +102,11 @@ class CallProvider extends ChangeNotifier {
   }
 
   Future<void> startCall(String targetUserId, String chatId, bool video) async {
+    if (_channel == null && ApiConfig.token != null) {
+      connectSignaling(ApiConfig.token!, chatId);
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
+
     _isVideo = video;
     _remoteUserId = targetUserId;
     _chatId = chatId;
@@ -110,9 +115,17 @@ class CallProvider extends ChangeNotifier {
 
     await _initWebRTC();
     if (video) {
-      await _webrtc!.startLocalVideo();
+      final stream = await _webrtc!.startLocalVideo();
+      if (stream == null) {
+        _endCall();
+        return;
+      }
     } else {
-      await _webrtc!.startLocalAudio();
+      final stream = await _webrtc!.startLocalAudio();
+      if (stream == null) {
+        _endCall();
+        return;
+      }
     }
 
     final offer = await _webrtc!.createOffer();
@@ -125,16 +138,30 @@ class CallProvider extends ChangeNotifier {
   }
 
   Future<void> answerCall() async {
+    if (_channel == null && ApiConfig.token != null && _chatId != null) {
+      connectSignaling(ApiConfig.token!, _chatId!);
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
+
     await _initWebRTC();
     final isVideoCall = _isVideo;
     if (isVideoCall) {
-      await _webrtc!.startLocalVideo();
+      final stream = await _webrtc!.startLocalVideo();
+      if (stream == null) {
+        rejectCall();
+        return;
+      }
     } else {
-      await _webrtc!.startLocalAudio();
+      final stream = await _webrtc!.startLocalAudio();
+      if (stream == null) {
+        rejectCall();
+        return;
+      }
     }
+    final answer = await _webrtc!.createAnswer();
     _status = CallStatus.connected;
     _startTimer();
-    _sendSignal('call.answer', {'chat_id': _chatId});
+    _sendSignal('call.answer', {'chat_id': _chatId, 'sdp': answer});
     notifyListeners();
   }
 

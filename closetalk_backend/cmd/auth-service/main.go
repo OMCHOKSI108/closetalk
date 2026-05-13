@@ -467,12 +467,12 @@ func handleRegisterInit(w http.ResponseWriter, r *http.Request) {
 
 	// Check existing user
 	var exists bool
-	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)", req.Email).Scan(&exists)
+	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 AND deleted_at IS NULL)", req.Email).Scan(&exists)
 	if exists {
 		writeError(w, http.StatusConflict, model.ErrEmailTaken)
 		return
 	}
-	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)", req.Username).Scan(&exists)
+	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1 AND deleted_at IS NULL)", req.Username).Scan(&exists)
 	if exists {
 		writeError(w, http.StatusConflict, &model.AppError{Code: "USERNAME_TAKEN", Message: "username is already taken"})
 		return
@@ -573,7 +573,7 @@ func handleRegisterVerify(w http.ResponseWriter, r *http.Request) {
 
 	// Double-check user doesn't exist
 	var exists bool
-	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)", req.Email).Scan(&exists)
+	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 AND deleted_at IS NULL)", req.Email).Scan(&exists)
 	if exists {
 		database.Valkey.Del(ctx, otpKey)
 		writeError(w, http.StatusConflict, model.ErrEmailTaken)
@@ -682,12 +682,12 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	// Check existing user
 	var exists bool
-	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)", req.Email).Scan(&exists)
+	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 AND deleted_at IS NULL)", req.Email).Scan(&exists)
 	if exists {
 		writeError(w, http.StatusConflict, model.ErrEmailTaken)
 		return
 	}
-	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)", req.Username).Scan(&exists)
+	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1 AND deleted_at IS NULL)", req.Username).Scan(&exists)
 	if exists {
 		writeError(w, http.StatusConflict, &model.AppError{Code: "USERNAME_TAKEN", Message: "username is already taken"})
 		return
@@ -857,7 +857,7 @@ func handleGoogleOAuth(w http.ResponseWriter, r *http.Request, idToken string) {
 	// Check if user exists
 	var userID string
 	err = database.Pool.QueryRow(ctx,
-		`SELECT id FROM users WHERE email = $1`, email,
+		`SELECT id FROM users WHERE email = $1 AND deleted_at IS NULL`, email,
 	).Scan(&userID)
 
 	if err != nil {
@@ -1137,10 +1137,11 @@ func handleGitHubOAuth(w http.ResponseWriter, r *http.Request, code string) {
 	// Find or create user
 	var userID string
 	err = database.Pool.QueryRow(ctx,
-		`SELECT id FROM users WHERE email = $1`, email,
+		`SELECT id FROM users WHERE email = $1 AND deleted_at IS NULL`, email,
 	).Scan(&userID)
 
 	if err != nil {
+		// Create new user
 		username := generateUsername(displayName)
 		userID = uuid.New().String()
 		now := time.Now()
@@ -1222,7 +1223,7 @@ func handleAppleOAuth(w http.ResponseWriter, r *http.Request, idToken string) {
 
 	var userID string
 	err = database.Pool.QueryRow(ctx,
-		`SELECT id FROM users WHERE email = $1`, email,
+		`SELECT id FROM users WHERE email = $1 AND deleted_at IS NULL`, email,
 	).Scan(&userID)
 
 	if err != nil {
@@ -1883,7 +1884,7 @@ func generateUsername(base string) string {
 	// Check uniqueness and append random suffix if needed
 	ctx := context.Background()
 	var exists bool
-	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)", username).Scan(&exists)
+	database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1 AND deleted_at IS NULL)", username).Scan(&exists)
 	if exists {
 		suffix := fmt.Sprintf("_%d", time.Now().Unix()%100000)
 		if len(username)+len(suffix) > 30 {

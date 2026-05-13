@@ -351,6 +351,20 @@ class MessageBubble extends StatelessWidget {
                       ],
                     ),
                   if (message.contentType == 'image' &&
+                      message.mediaUrl != null &&
+                      message.mediaUrl!.isNotEmpty)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(
+                        message.mediaUrl!,
+                        height: 150,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) =>
+                            const Icon(Icons.broken_image, size: 50),
+                      ),
+                    )
+                  else if (message.contentType == 'image' &&
                       message.content.isNotEmpty)
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),

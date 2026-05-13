@@ -291,7 +291,7 @@ func handleListGroups(w http.ResponseWriter, r *http.Request) {
 
 	ctx := context.Background()
 	rows, err := database.Pool.Query(ctx,
-		`SELECT g.id, g.name, g.description, g.avatar_url, g.is_public, g.member_limit,
+		`SELECT g.id, g.conversation_id, g.name, g.description, g.avatar_url, g.is_public, g.member_limit,
 		        g.created_at, g.updated_at,
 		        (SELECT COUNT(*) FROM group_members WHERE group_id = g.id AND left_at IS NULL),
 		        gm.role,
@@ -310,23 +310,24 @@ func handleListGroups(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type groupListItem struct {
-		ID          uuid.UUID `json:"id"`
-		Name        string    `json:"name"`
-		Description string    `json:"description"`
-		AvatarURL   string    `json:"avatar_url,omitempty"`
-		IsPublic    bool      `json:"is_public"`
-		MemberLimit int       `json:"member_limit"`
-		MemberCount int       `json:"member_count"`
-		Role        string    `json:"role"`
-		IsMuted     bool      `json:"is_muted"`
-		CreatedAt   time.Time `json:"created_at"`
-		UpdatedAt   time.Time `json:"updated_at"`
+		ID             uuid.UUID `json:"id"`
+		ConversationID uuid.UUID `json:"conversation_id"`
+		Name           string    `json:"name"`
+		Description    string    `json:"description"`
+		AvatarURL      string    `json:"avatar_url,omitempty"`
+		IsPublic       bool      `json:"is_public"`
+		MemberLimit    int       `json:"member_limit"`
+		MemberCount    int       `json:"member_count"`
+		Role           string    `json:"role"`
+		IsMuted        bool      `json:"is_muted"`
+		CreatedAt      time.Time `json:"created_at"`
+		UpdatedAt      time.Time `json:"updated_at"`
 	}
 
 	groups := []groupListItem{}
 	for rows.Next() {
 		var g groupListItem
-		rows.Scan(&g.ID, &g.Name, &g.Description, &g.AvatarURL, &g.IsPublic, &g.MemberLimit,
+		rows.Scan(&g.ID, &g.ConversationID, &g.Name, &g.Description, &g.AvatarURL, &g.IsPublic, &g.MemberLimit,
 			&g.CreatedAt, &g.UpdatedAt, &g.MemberCount, &g.Role, &g.IsMuted)
 		groups = append(groups, g)
 	}

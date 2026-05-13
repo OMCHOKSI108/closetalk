@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../models/group.dart';
 import '../../providers/group_provider.dart';
 import '../../services/group_service.dart';
 import '../../services/api_config.dart';
 import '../chat/group_create_screen.dart';
 import '../chat/group_discover_screen.dart';
-import '../chat/group_info_screen.dart';
+import '../chat/chat_detail_screen.dart';
 
 class GroupListScreen extends StatefulWidget {
   const GroupListScreen({super.key});
@@ -72,27 +71,17 @@ class _GroupListScreenState extends State<GroupListScreen> {
                       ],
                     ),
                     onTap: () {
+                      final chatId = g.conversationId ?? g.id;
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => GroupInfoScreen(
-                            group: Group(
-                              id: g.id,
-                              name: g.name,
-                              description: g.description,
-                              createdBy: '',
-                              isPublic: g.isPublic,
-                              memberLimit: g.memberLimit,
-                              memberCount: g.memberCount,
-                              isMuted: g.isMuted,
-                              role: g.role,
-                              createdAt: g.createdAt,
-                              updatedAt: g.updatedAt,
-                            ),
-                            groupService: groupService,
+                          builder: (_) => ChatDetailScreen(
+                            chatId: chatId,
+                            chatTitle: g.name,
+                            groupId: g.id,
                           ),
                         ),
-                      ).then((_) => _refresh());
+                      );
                     },
                   ),
                 );

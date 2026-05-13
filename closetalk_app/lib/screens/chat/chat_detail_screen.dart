@@ -79,6 +79,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     chat.fetchMessages(widget.chatId, refresh: true);
     chat.connectWebSocket(widget.chatId);
     chat.markChatRead(widget.chatId);
+    final call = context.read<CallProvider>();
+    if (ApiConfig.token != null) {
+      call.connectSignaling(ApiConfig.token!, widget.chatId);
+    }
     _initE2EE();
 
     _scrollController.addListener(() {
@@ -698,12 +702,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   void _startVoiceCall() {
     final call = context.read<CallProvider>();
-    call.startCall(widget.chatId, widget.chatId, false);
+    final targetId = widget.peerUserId ?? widget.chatId;
+    call.startCall(targetId, widget.chatId, false);
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => CallScreen(
-          remoteUserId: widget.chatId,
+          remoteUserId: targetId,
           remoteDisplayName: widget.chatTitle,
           isVideo: false,
         ),
@@ -713,12 +718,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   void _startVideoCall() {
     final call = context.read<CallProvider>();
-    call.startCall(widget.chatId, widget.chatId, true);
+    final targetId = widget.peerUserId ?? widget.chatId;
+    call.startCall(targetId, widget.chatId, true);
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => CallScreen(
-          remoteUserId: widget.chatId,
+          remoteUserId: targetId,
           remoteDisplayName: widget.chatTitle,
           isVideo: true,
         ),
@@ -769,16 +775,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               tooltip: 'Voice call',
               onPressed: () {
                 final call = context.read<CallProvider>();
-                call.startCall(
-                  widget.chatId,
-                  widget.chatId,
-                  false,
-                );
+                final targetId = widget.peerUserId ?? widget.chatId;
+                call.startCall(targetId, widget.chatId, false);
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => CallScreen(
-                      remoteUserId: widget.chatId,
+                      remoteUserId: targetId,
                       remoteDisplayName: widget.chatTitle,
                       isVideo: false,
                     ),
@@ -791,16 +794,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               tooltip: 'Video call',
               onPressed: () {
                 final call = context.read<CallProvider>();
-                call.startCall(
-                  widget.chatId,
-                  widget.chatId,
-                  true,
-                );
+                final targetId = widget.peerUserId ?? widget.chatId;
+                call.startCall(targetId, widget.chatId, true);
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => CallScreen(
-                      remoteUserId: widget.chatId,
+                      remoteUserId: targetId,
                       remoteDisplayName: widget.chatTitle,
                       isVideo: true,
                     ),
