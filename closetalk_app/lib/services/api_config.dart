@@ -1,10 +1,10 @@
 class ApiConfig {
-  // Set to false to use production CloudFront URL.
-  // For Android emulator: 10.0.2.2 maps to host machine's localhost.
-  // For real device: replace 10.0.2.2 with your machine's LAN IP (e.g. 192.168.x.x).
+  // Defaults to production CloudFront. To use a local backend during dev, run:
+  //   flutter run --dart-define=USE_LOCAL=true
+  // (Android emulator: 10.0.2.2 maps to host's localhost. Real device: use LAN IP.)
   static const bool useLocal = bool.fromEnvironment(
     'USE_LOCAL',
-    defaultValue: true,
+    defaultValue: false,
   );
   static const String localHost = '10.0.2.2';
 
